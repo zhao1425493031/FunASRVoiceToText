@@ -1,0 +1,22 @@
+host: "0.0.0.0"
+port: 8765
+asr_backend: "runtime"
+language: "ja"
+asr_model: "iic/SenseVoiceSmall"
+punc_model: ""
+trust_remote_code: true
+device: "auto"
+chunk_size: [0, 10, 5]
+vad_silence_ms: 800
+stream_window_ms: 2000
+log_dir: "logs"
+sample_rate: 16000
+api_key: ""
+max_ws_connections: 20
+runtime_host: "127.0.0.1"
+runtime_port: 10095
+runtime_mode: "2pass"
+runtime_chunk_size: "5,10,5"
+runtime_ssl: false
+ssl_certfile: "certs/cert.pem"
+ssl_keyfile: "certs/key.pem"

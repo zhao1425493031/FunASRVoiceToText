@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>实时语音识别</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>实时语音识别</h1>
+    <p class="subtitle" id="statusText">就绪</p>
+  </header>
+
+  <main class="main">
+    <section class="panel partial-panel">
+      <h2>识别中</h2>
+      <p id="partialText" class="text-display partial-display">—</p>
+    </section>
+    <section class="panel final-panel">
+      <h2>已确认</h2>
+      <div id="finalList" class="final-list"></div>
+    </section>
+  </main>
+
+  <footer class="controls">
+    <button id="btnStart" type="button" class="btn btn-primary">开始识别</button>
+    <button id="btnStop" type="button" class="btn btn-secondary" disabled>停止识别</button>
+    <button id="btnClear" type="button" class="btn btn-ghost">清空</button>
+  </footer>
+
+  <p class="hint" id="accessHint">请使用与电脑同一 WiFi。iPhone 请用 <strong>https://</strong>&lt;电脑IP&gt;:8765</p>
+  <script src="/static/app.js"></script>
+</body>
+</html>

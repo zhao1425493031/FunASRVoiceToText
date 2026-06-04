@@ -1,0 +1,248 @@
+/**
+ * Mobile-first Web client: 16kHz PCM chunks over WebSocket.
+ * Uses ScriptProcessorNode for broad browser compatibility.
+ */
+
+(function () {
+  const TARGET_SR = 16000;
+  const CHUNK_SAMPLES = 9600; // 600ms @ 16kHz, chunk_size [0,10,5]
+  const CHUNK_BYTES = CHUNK_SAMPLES * 2;
+
+  const statusText = document.getElementById("statusText");
+  const partialText = document.getElementById("partialText");
+  const finalList = document.getElementById("finalList");
+  const btnStart = document.getElementById("btnStart");
+  const btnStop = document.getElementById("btnStop");
+  const btnClear = document.getElementById("btnClear");
+
+  let state = "idle";
+  let ws = null;
+  let audioContext = null;
+  let mediaStream = null;
+  let processor = null;
+  let source = null;
+  let pcmBuffer = [];
+
+  function apiKeyFromQuery() {
+    const params = new URLSearchParams(location.search);
+    return params.get("key") || "";
+  }
+
+  function wsUrl() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/ws/asr`;
+  }
+
+  function setState(next) {
+    state = next;
+    document.body.className = `state-${next}`;
+    const labels = {
+      idle: "就绪",
+      listening: "正在识别…",
+      error: "出错",
+    };
+    statusText.textContent = labels[next] || next;
+    btnStart.disabled = next === "listening";
+    btnStop.disabled = next !== "listening";
+  }
+
+  function resampleTo16k(float32, inputRate) {
+    if (inputRate === TARGET_SR) {
+      return float32;
+    }
+    const ratio = inputRate / TARGET_SR;
+    const outLen = Math.floor(float32.length / ratio);
+    const out = new Float32Array(outLen);
+    for (let i = 0; i < outLen; i++) {
+      const srcIdx = i * ratio;
+      const idx0 = Math.floor(srcIdx);
+      const idx1 = Math.min(idx0 + 1, float32.length - 1);
+      const frac = srcIdx - idx0;
+      out[i] = float32[idx0] * (1 - frac) + float32[idx1] * frac;
+    }
+    return out;
+  }
+
+  function floatToInt16(float32) {
+    const int16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+    }
+    return int16;
+  }
+
+  function appendSamples(float32) {
+    const int16 = floatToInt16(float32);
+    for (let i = 0; i < int16.length; i++) {
+      pcmBuffer.push(int16[i]);
+    }
+    while (pcmBuffer.length >= CHUNK_SAMPLES && ws && ws.readyState === WebSocket.OPEN) {
+      const slice = pcmBuffer.splice(0, CHUNK_SAMPLES);
+      const buf = new Int16Array(slice);
+      ws.send(buf.buffer);
+    }
+  }
+
+  function addFinalLine(text) {
+    if (!text || !text.trim()) return;
+    const div = document.createElement("div");
+    div.className = "final-item";
+    div.textContent = text.trim();
+    finalList.appendChild(div);
+    partialText.textContent = "—";
+  }
+
+  function handleServerMessage(raw) {
+    let msg;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (msg.type === "partial" && msg.text) {
+      partialText.textContent = msg.text;
+    } else if (msg.type === "final" && msg.text) {
+      addFinalLine(msg.text);
+    } else if (msg.type === "error") {
+      setState("error");
+      statusText.textContent = msg.message || "服务器错误";
+    }
+  }
+
+  function ensureMicrophoneApi() {
+    const secure =
+      window.isSecureContext ||
+      location.protocol === "https:" ||
+      location.hostname === "localhost" ||
+      location.hostname === "127.0.0.1";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (!secure && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+        throw new Error(
+          "手机/浏览器需要 HTTPS 才能使用麦克风。请用 https://<电脑IP>:8765 访问，并先运行 python scripts/generate_cert.py --ip <电脑IP>"
+        );
+      }
+      throw new Error("当前浏览器不支持麦克风 API，请换 Chrome/Safari 或使用 HTTPS");
+    }
+  }
+
+  async function startAudio() {
+    ensureMicrophoneApi();
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+      video: false,
+    });
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const inputRate = audioContext.sampleRate;
+    source = audioContext.createMediaStreamSource(mediaStream);
+    const bufferSize = 4096;
+    processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+    processor.onaudioprocess = function (e) {
+      if (state !== "listening") return;
+      const input = e.inputBuffer.getChannelData(0);
+      const copy = new Float32Array(input.length);
+      copy.set(input);
+      const resampled = resampleTo16k(copy, inputRate);
+      appendSamples(resampled);
+    };
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+  }
+
+  function stopAudio() {
+    if (processor) {
+      processor.disconnect();
+      processor = null;
+    }
+    if (source) {
+      source.disconnect();
+      source = null;
+    }
+    if (mediaStream) {
+      mediaStream.getTracks().forEach((t) => t.stop());
+      mediaStream = null;
+    }
+    if (audioContext) {
+      audioContext.close();
+      audioContext = null;
+    }
+    pcmBuffer = [];
+  }
+
+  function connectWebSocket() {
+    return new Promise((resolve, reject) => {
+      ws = new WebSocket(wsUrl());
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+        const startMsg = {
+          type: "start",
+          wav_name: "web_mic",
+          audio_fs: TARGET_SR,
+          wav_format: "pcm",
+          chunk_size: [0, 10, 5],
+          itn: false,
+        };
+        const key = apiKeyFromQuery();
+        if (key) {
+          startMsg.api_key = key;
+        }
+        ws.send(JSON.stringify(startMsg));
+        resolve();
+      };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === "string") {
+          handleServerMessage(ev.data);
+        }
+      };
+      ws.onerror = () => reject(new Error("WebSocket 连接失败"));
+      ws.onclose = () => {
+        if (state === "listening") {
+          setState("idle");
+        }
+      };
+    });
+  }
+
+  async function startRecognition() {
+    try {
+      ensureMicrophoneApi();
+      setState("listening");
+      await connectWebSocket();
+      await startAudio();
+    } catch (err) {
+      setState("error");
+      statusText.textContent = err.message || String(err);
+      stopAudio();
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+    }
+  }
+
+  function stopRecognition() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "end", is_speaking: false }));
+      setTimeout(() => {
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+      }, 1500);
+    }
+    stopAudio();
+    setState("idle");
+  }
+
+  btnStart.addEventListener("click", startRecognition);
+  btnStop.addEventListener("click", stopRecognition);
+  btnClear.addEventListener("click", () => {
+    finalList.innerHTML = "";
+    partialText.textContent = "—";
+  });
+})();

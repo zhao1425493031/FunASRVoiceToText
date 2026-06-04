@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt pyproject.toml README.md config.enterprise.yaml ./
+COPY src ./src
+COPY web ./web
+COPY scripts ./scripts
+
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -e .
+
+EXPOSE 8765
+
+CMD ["python", "scripts/run_server.py", "--config", "config.enterprise.yaml"]
