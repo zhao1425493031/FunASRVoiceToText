@@ -22,6 +22,9 @@
   let processor = null;
   let source = null;
   let pcmBuffer = [];
+  let awaitingFinal = false;
+  let finalTimeoutId = null;
+  const FINAL_WAIT_MS = 60000;
 
   function apiKeyFromQuery() {
     const params = new URLSearchParams(location.search);
@@ -39,10 +42,11 @@
     const labels = {
       idle: "就绪",
       listening: "正在识别…",
+      finalizing: "正在定稿…",
       error: "出错",
     };
     statusText.textContent = labels[next] || next;
-    btnStart.disabled = next === "listening";
+    btnStart.disabled = next === "listening" || next === "finalizing";
     btnStop.disabled = next !== "listening";
   }
 
@@ -72,6 +76,29 @@
     return int16;
   }
 
+  function sendPcmChunk(samples) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const buf = new Int16Array(samples);
+    ws.send(buf.buffer);
+  }
+
+  function flushPendingPcm() {
+    while (pcmBuffer.length >= CHUNK_SAMPLES && ws && ws.readyState === WebSocket.OPEN) {
+      const slice = pcmBuffer.splice(0, CHUNK_SAMPLES);
+      sendPcmChunk(slice);
+    }
+    if (pcmBuffer.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      const padded = new Int16Array(CHUNK_SAMPLES);
+      for (let i = 0; i < pcmBuffer.length; i++) {
+        padded[i] = pcmBuffer[i];
+      }
+      sendPcmChunk(padded);
+      pcmBuffer = [];
+    }
+  }
+
   function appendSamples(float32) {
     const int16 = floatToInt16(float32);
     for (let i = 0; i < int16.length; i++) {
@@ -79,8 +106,31 @@
     }
     while (pcmBuffer.length >= CHUNK_SAMPLES && ws && ws.readyState === WebSocket.OPEN) {
       const slice = pcmBuffer.splice(0, CHUNK_SAMPLES);
-      const buf = new Int16Array(slice);
-      ws.send(buf.buffer);
+      sendPcmChunk(slice);
+    }
+  }
+
+  function clearFinalWait() {
+    if (finalTimeoutId !== null) {
+      clearTimeout(finalTimeoutId);
+      finalTimeoutId = null;
+    }
+    awaitingFinal = false;
+  }
+
+  function finishStopSession() {
+    clearFinalWait();
+    if (ws) {
+      ws.close();
+      ws = null;
+    }
+    setState("idle");
+  }
+
+  function applyDraftFallbackIfNeeded() {
+    const draft = partialText.textContent;
+    if (draft && draft !== "—" && finalList.childElementCount === 0) {
+      setSessionFinal(draft);
     }
   }
 
@@ -111,9 +161,27 @@
       partialText.textContent = msg.text;
     } else if (msg.type === "final" && msg.text) {
       setSessionFinal(msg.text);
+      partialText.textContent = msg.text;
+      if (awaitingFinal) {
+        finishStopSession();
+      }
     } else if (msg.type === "error") {
+      const wasListening = state === "listening";
       setState("error");
-      statusText.textContent = msg.message || "服务器错误";
+      if (msg.code === "session_too_long") {
+        statusText.textContent =
+          msg.message ||
+          "录音超过单次时长上限，请分段录制";
+      } else {
+        statusText.textContent = msg.message || "服务器错误";
+      }
+      if (wasListening) {
+        stopAudio();
+        if (ws) {
+          ws.close();
+          ws = null;
+        }
+      }
     }
   }
 
@@ -208,7 +276,13 @@
       };
       ws.onerror = () => reject(new Error("WebSocket 连接失败"));
       ws.onclose = () => {
-        if (state === "listening") {
+        if (awaitingFinal) {
+          applyDraftFallbackIfNeeded();
+          clearFinalWait();
+          setState("idle");
+          return;
+        }
+        if (state === "listening" || state === "finalizing") {
           setState("idle");
         }
       };
@@ -233,16 +307,22 @@
   }
 
   function stopRecognition() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "end", is_speaking: false }));
-      setTimeout(() => {
-        if (ws) {
-          ws.close();
-          ws = null;
-        }
-      }, 1500);
-    }
     stopAudio();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      flushPendingPcm();
+      awaitingFinal = true;
+      setState("finalizing");
+      ws.send(JSON.stringify({ type: "end", is_speaking: false }));
+      finalTimeoutId = setTimeout(() => {
+        if (!awaitingFinal) {
+          return;
+        }
+        applyDraftFallbackIfNeeded();
+        finishStopSession();
+      }, FINAL_WAIT_MS);
+      return;
+    }
+    applyDraftFallbackIfNeeded();
     setState("idle");
   }
 

@@ -172,6 +172,14 @@ class WSProtocolHandler:
         async with self.inference_lock:
             result = await asyncio.to_thread(self.session.feed_pcm, data)
 
+        if result.session_too_long:
+            await send_error(
+                self.websocket,
+                "session_too_long",
+                f"Recording exceeds {self.config.session_pcm_max_seconds}s limit",
+            )
+            return
+
         if result.partial:
             await self.websocket.send_text(
                 encode_message(
@@ -197,7 +205,12 @@ class WSProtocolHandler:
             async with self.inference_lock:
                 result = await asyncio.to_thread(self.session.finalize)
             if result.final:
-                await self._send_final(result.final)
+                try:
+                    await self._send_final(result.final)
+                except Exception as exc:
+                    logger.warning("Could not send final (client may have disconnected): %s", exc)
+            else:
+                logger.warning("Finalize produced no final text for client")
             self.session.reset()
 
         self.started = False

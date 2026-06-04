@@ -44,6 +44,9 @@ class RuntimeGatewayEngine:
     def finalize_text(self, text: str) -> str:
         return text.strip()
 
+    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        return self.finalize_text(draft_fallback)
+
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         raise NotImplementedError("Batch transcribe not supported in runtime gateway mode")
 

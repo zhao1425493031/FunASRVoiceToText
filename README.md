@@ -6,10 +6,12 @@
 
 | 阶段 | `asr_backend` | 说明 |
 |------|---------------|------|
-| 一 | `sensevoice`（默认） | 进程内 `iic/SenseVoiceSmall`，`language=ja`，2s 窗口伪流式 |
+| 一 | `sensevoice`（默认） | 进程内 `iic/SenseVoiceSmall`，2s 窗口伪流式；**停止时整段定稿** + `ct-punc` 兜底 |
 | 二 | `runtime` | FunASR Runtime 2pass 侧车（Docker），网关 WebSocket 转发 |
 
-本文档**合并了安装说明与按顺序操作手顺**。企业配置见 [`config.enterprise.yaml`](config.enterprise.yaml)；技术方案见 [`doc/企业日语生产方案.md`](doc/企业日语生产方案.md)。
+本文档**合并了安装说明与按顺序操作手顺**。企业配置见 [`config.enterprise.yaml`](config.enterprise.yaml)；公开发布定稿见 [`doc/企业公开发布实施方案.md`](doc/企业公开发布实施方案.md)；技术方案见 [`doc/企业日语生产方案.md`](doc/企业日语生产方案.md)。
+
+**关键配置（公开发布）：** `session_pcm_max_seconds: 600`（单次录音上限）、`punc_model: ct-punc`（定稿标点兜底）、`auto_finalize_on_silence: false`（仅 `end` 定稿）。
 
 ---
 

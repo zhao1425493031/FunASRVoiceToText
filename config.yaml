@@ -4,7 +4,8 @@ asr_backend: "sensevoice"
 language: "zh"
 asr_model: "iic/SenseVoiceSmall"
 vad_model: "fsmn-vad"
-punc_model: ""
+punc_model: "ct-punc"
+session_pcm_max_seconds: 600
 trust_remote_code: true
 device: "auto"
 chunk_size: [0, 10, 5]

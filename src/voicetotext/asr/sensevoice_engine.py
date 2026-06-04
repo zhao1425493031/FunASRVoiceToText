@@ -1,4 +1,4 @@
-"""SenseVoiceSmall Japanese ASR backend with window-based pseudo-streaming."""
+"""SenseVoiceSmall ASR backend with window-based pseudo-streaming."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ from typing import Any
 
 import numpy as np
 
+from voicetotext.asr.punc_restorer import PuncRestorer
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
+from voicetotext.text_utils import audio_rms, is_meaningful_text, strip_model_tags
 
 logger = get_logger(__name__)
 
@@ -20,6 +22,7 @@ class SenseVoiceEngine:
         self.config = config
         self.device = resolve_device(config.device)
         self._model: Any = None
+        self._punc_restorer = PuncRestorer(config)
 
     @property
     def is_loaded(self) -> bool:
@@ -58,21 +61,56 @@ class SenseVoiceEngine:
     def detect_speech(self, audio: np.ndarray) -> bool:
         if audio.size == 0:
             return False
-        from voicetotext.stream_session import audio_rms
-
         return audio_rms(audio) >= self.config.vad_energy_threshold
 
     def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
         if audio.size == 0:
             return ""
+        use_itn = is_final
         t0 = time.perf_counter()
         try:
             result = self.model.generate(
                 input=audio,
                 cache=cache,
                 language=self.config.language,
-                use_itn=True,
+                use_itn=use_itn,
                 is_final=is_final,
+            )
+        except TypeError:
+            result = self.model.generate(
+                input=audio,
+                cache=cache,
+                language=self.config.language,
+                use_itn=use_itn,
+            )
+        text = self._extract_text(result)
+        if is_final:
+            text = self._postprocess(text)
+        else:
+            text = strip_model_tags(text)
+        if text:
+            logger.info(
+                "SenseVoice window %.0fms is_final=%s use_itn=%s text=%r",
+                (time.perf_counter() - t0) * 1000,
+                is_final,
+                use_itn,
+                text,
+            )
+        return text
+
+    def transcribe_utterance(self, audio: np.ndarray) -> str:
+        """Full-session pass with ITN for authoritative final text."""
+        if audio.size == 0:
+            return ""
+        t0 = time.perf_counter()
+        cache: dict = {}
+        try:
+            result = self.model.generate(
+                input=audio,
+                cache=cache,
+                language=self.config.language,
+                use_itn=True,
+                is_final=True,
             )
         except TypeError:
             result = self.model.generate(
@@ -81,26 +119,43 @@ class SenseVoiceEngine:
                 language=self.config.language,
                 use_itn=True,
             )
-        text = self._extract_text(result)
-        text = self._postprocess(text)
+        text = self._postprocess(self._extract_text(result))
         if text:
             logger.info(
-                "SenseVoice window %.0fms is_final=%s text=%r",
+                "SenseVoice utterance %.0fms text=%r",
                 (time.perf_counter() - t0) * 1000,
-                is_final,
-                text,
+                text[:80] + ("..." if len(text) > 80 else ""),
             )
         return text
 
+    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        """Prefer full audio ITN; fall back to ct-punc on streaming draft."""
+        min_chars = self.config.min_partial_chars
+        if audio.size > 0 and audio_rms(audio) >= self.config.vad_energy_threshold:
+            text = self.transcribe_utterance(audio)
+            if text and is_meaningful_text(text, min_chars):
+                return text
+            logger.warning("Full utterance ASR returned empty or trivial text")
+
+        fallback = strip_model_tags(draft_fallback.strip())
+        if fallback and self.config.punc_model:
+            logger.warning("Applying ct-punc fallback on streaming draft len=%d", len(fallback))
+            restored = self._punc_restorer.restore(fallback)
+            if restored and is_meaningful_text(restored, min_chars):
+                return restored
+
+        if fallback:
+            logger.error("Finalize fallback: returning draft without punctuation")
+            return self.finalize_text(fallback)
+        return ""
+
     def finalize_text(self, text: str) -> str:
-        return self._postprocess(text.strip())
+        return self._postprocess(strip_model_tags(text.strip()))
 
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         if sample_rate != self.config.sample_rate:
             audio = self._resample(audio, sample_rate, self.config.sample_rate)
-        cache: dict = {}
-        text = self.transcribe_window(audio, cache, is_final=True)
-        return self.finalize_text(text)
+        return self.finalize_utterance(audio, "")
 
     async def check_ready(self) -> bool:
         return self.is_loaded

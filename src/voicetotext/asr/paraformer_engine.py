@@ -55,9 +55,16 @@ class ParaformerEngine:
     def detect_speech(self, audio: np.ndarray) -> bool:
         if audio.size == 0:
             return False
-        from voicetotext.stream_session import audio_rms
+        from voicetotext.text_utils import audio_rms
 
         return audio_rms(audio) >= self.config.vad_energy_threshold
+
+    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        if audio.size > 0:
+            text = self.transcribe_file(audio, self.config.sample_rate)
+            if text.strip():
+                return text
+        return self.finalize_text(draft_fallback)
 
     def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
         result = self.model.generate(

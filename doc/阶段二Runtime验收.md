@@ -20,6 +20,7 @@
 | p2-docker-deploy | compose、runtime.env、启动脚本 | 完成 |
 | p2-linux-doc | README Linux+Runtime | 完成 |
 | p2-doc-phase2 | 企业方案、架构、协议、验收清单 | 完成 |
+| e10-uat-runtime | PC/手机 HTTPS 2pass 实测 | 待实测 |
 
 ## 启动顺序（必守）
 

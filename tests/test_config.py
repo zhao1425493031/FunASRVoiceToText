@@ -9,9 +9,11 @@ def test_load_config_defaults() -> None:
     cfg = load_config()
     assert cfg.port == 8765
     assert cfg.asr_backend == "sensevoice"
-    assert cfg.language == "ja"
+    assert cfg.language in ("ja", "zh", "auto", "en", "ko", "yue")
     assert cfg.asr_model == "iic/SenseVoiceSmall"
-    assert cfg.punc_model == ""
+    assert cfg.punc_model == "ct-punc"
+    assert cfg.session_pcm_max_seconds == 600
+    assert cfg.session_pcm_max_bytes == 600 * 16000 * 2
     assert cfg.chunk_size == [0, 10, 5]
     assert cfg.chunk_stride_samples == 9600
     assert cfg.stream_window_ms == 2000

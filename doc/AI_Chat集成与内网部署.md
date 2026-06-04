@@ -85,7 +85,7 @@ python scripts/run_server.py
 | 点话筒 | `getUserMedia` → 连接 `wss://.../ws/asr` → 发 `start` | — |
 | 正在说 | 每 600ms 发二进制 PCM **19200 字节** | `type: partial` |
 | 更新输入框 | `input.value = msg.text`（或 partial 覆盖、final 定稿） | `text` 字段 |
-| 点结束 | 发 `end` → 停录音 → `close` WebSocket | `type: final`（可选再等一条） |
+| 点结束 | 发 `end` → 停录音 → `close` WebSocket | `type: final`（**唯一业务定稿**，须等本条再提交大模型） |
 
 ### 3.3 `start` / `end` 示例
 
@@ -116,6 +116,9 @@ python scripts/run_server.py
 
 - **首段 partial 延迟**：默认 `stream_window_ms: 2000`，约 **2～5 秒** 才可能有首字；UI 建议显示「正在识别…」
 - **一条 growing 字幕**：同一轮 `start`～`end` 内，`partial.text` 为 **会话累计草稿**（非每 2 秒覆盖）；点结束后 `final` 为 **整段定稿**
+- **partial vs final**：`partial.text` 仅为预览草稿；**停止/end 后的 `final.text` 为权威提交内容**（可能与 partial 措辞略有不同）
+- **标点**：流式 `partial` 关闭窗级 ITN；**停止时**对会话缓冲整段 PCM `use_itn=True` 重识别，失败则 `ct-punc` 对 draft 兜底
+- **时长上限**：默认单次录音 **600 秒**（`session_pcm_max_seconds`），超限服务端 `error` code `session_too_long`
 - **静音/噪声**：整窗能量低于 `vad_energy_threshold`（默认 `0.02`）不推理；纯标点等由 `min_partial_chars` 过滤
 - **静音判句**：默认 `auto_finalize_on_silence: false`，**仅** `end`/停止时发 `final`；停顿不会拆成多条
 - **并发**：多连接共享 **串行推理**（`inference_lock`），用户多时可能排队；`max_ws_connections` 默认 20

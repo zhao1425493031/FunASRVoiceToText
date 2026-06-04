@@ -33,6 +33,10 @@ class ASRBackend(Protocol):
         """Apply post-processing (punctuation / ITN) for final output."""
         ...
 
+    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        """Authoritative final: full audio ITN when possible, else draft + punc fallback."""
+        ...
+
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         """Transcribe full utterance (batch API / CLI file mode)."""
         ...

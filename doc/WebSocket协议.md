@@ -88,6 +88,20 @@ sequenceDiagram
 
 收到 `error` 后连接关闭。
 
+### session_too_long（SenseVoice 模式）
+
+单次会话累积 PCM 超过 `session_pcm_max_seconds`（默认 600）：
+
+```json
+{
+  "type": "error",
+  "code": "session_too_long",
+  "message": "Recording exceeds 600s limit"
+}
+```
+
+客户端应提示用户分段录制。
+
 ## Runtime 模式映射（`asr_backend=runtime`）
 
 网关转发至 FunASR Runtime 2pass，将 Runtime 消息映射为上述客户端格式：

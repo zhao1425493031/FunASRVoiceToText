@@ -3,7 +3,8 @@ port: 8765
 asr_backend: "runtime"
 language: "ja"
 asr_model: "iic/SenseVoiceSmall"
-punc_model: ""
+punc_model: "ct-punc"
+session_pcm_max_seconds: 600
 trust_remote_code: true
 device: "auto"
 chunk_size: [0, 10, 5]

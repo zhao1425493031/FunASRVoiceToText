@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Callable
@@ -11,32 +10,17 @@ import numpy as np
 
 from voicetotext.asr.base import ASRBackend
 from voicetotext.config import AppConfig
+from voicetotext.logging_setup import get_logger
+from voicetotext.text_utils import audio_rms, is_meaningful_text, merge_utterance_segments
 
-# Punctuation-only fragments (noise hallucinations) are not sent to clients.
-_PUNCT_ONLY = re.compile(r"^[\s。．.,、!?！？…・\-_'\"]+$")
-
-
-def audio_rms(audio: np.ndarray) -> float:
-    if audio.size == 0:
-        return 0.0
-    return float(np.sqrt(np.mean(audio * audio)))
-
-
-def is_meaningful_text(text: str, min_chars: int = 2) -> bool:
-    """Return True if text has enough non-punctuation content to show users."""
-    stripped = text.strip()
-    if not stripped:
-        return False
-    if _PUNCT_ONLY.match(stripped):
-        return False
-    core = re.sub(r"[\s。．.,、!?！？…・\-_'\"]", "", stripped)
-    return len(core) >= min_chars
+logger = get_logger(__name__)
 
 
 @dataclass
 class SessionResult:
     partial: str | None = None
     final: str | None = None
+    session_too_long: bool = False
 
 
 @dataclass
@@ -50,6 +34,10 @@ class StreamSession:
     last_voice_ts: float = field(default_factory=time.time)
     _pending_pcm: bytearray = field(default_factory=bytearray)
     _window_pcm: bytearray = field(default_factory=bytearray)
+    _session_pcm: bytearray = field(default_factory=bytearray)
+
+    def _accumulates_session_pcm(self) -> bool:
+        return self.config.asr_backend.lower() == "sensevoice"
 
     def reset(self) -> None:
         self.cache.clear()
@@ -59,10 +47,28 @@ class StreamSession:
         self.last_voice_ts = time.time()
         self._pending_pcm.clear()
         self._window_pcm.clear()
+        self._session_pcm.clear()
+
+    def _try_append_session_pcm(self, pcm_bytes: bytes) -> bool:
+        max_bytes = self.config.session_pcm_max_bytes
+        if len(self._session_pcm) + len(pcm_bytes) > max_bytes:
+            logger.warning(
+                "Session PCM exceeds limit %ds (%d bytes)",
+                self.config.session_pcm_max_seconds,
+                max_bytes,
+            )
+            return False
+        self._session_pcm.extend(pcm_bytes)
+        return True
 
     def feed_pcm(self, pcm_bytes: bytes) -> SessionResult:
-        self._pending_pcm.extend(pcm_bytes)
         out = SessionResult()
+        if self._accumulates_session_pcm():
+            if not self._try_append_session_pcm(pcm_bytes):
+                out.session_too_long = True
+                return out
+
+        self._pending_pcm.extend(pcm_bytes)
         stride_bytes = self.config.chunk_stride_bytes
 
         while len(self._pending_pcm) >= stride_bytes:
@@ -126,7 +132,7 @@ class StreamSession:
         if not text or not is_meaningful_text(text, self.config.min_partial_chars):
             return out
 
-        merged = self._merge_segment(self.draft, text)
+        merged = merge_utterance_segments(self.draft, text)
         if merged == self.draft:
             return out
 
@@ -135,25 +141,8 @@ class StreamSession:
         out.partial = self.draft
         return out
 
-    @staticmethod
-    def _merge_segment(draft: str, segment: str) -> str:
-        """Append or extend session draft for independent window transcripts."""
-        segment = segment.strip()
-        if not segment:
-            return draft
-        if not draft:
-            return segment
-        if segment == draft:
-            return draft
-        if draft in segment and len(segment) > len(draft):
-            return segment
-        if segment in draft:
-            return draft
-        return draft + segment
-
-    def finalize(self) -> SessionResult:
-        out = SessionResult()
-
+    def _flush_tail_draft(self) -> None:
+        """Merge trailing window audio into draft for punc fallback."""
         if self._pending_pcm:
             remainder = bytes(self._pending_pcm)
             self._pending_pcm.clear()
@@ -164,24 +153,42 @@ class StreamSession:
             self._window_pcm.clear()
             if self._window_has_speech(window_audio):
                 text = self.engine.transcribe_window(
-                    window_audio, self.cache, is_final=True
+                    window_audio, self.cache, is_final=False
                 )
                 if text and is_meaningful_text(text, self.config.min_partial_chars):
-                    self.draft = self._merge_segment(self.draft, text)
+                    self.draft = merge_utterance_segments(self.draft, text)
 
-        if self.draft:
+    def finalize(self) -> SessionResult:
+        out = SessionResult()
+        self._flush_tail_draft()
+
+        min_chars = self.config.min_partial_chars
+        final_text = ""
+
+        if self._accumulates_session_pcm():
+            audio = (
+                self.engine.pcm_bytes_to_float32(bytes(self._session_pcm))
+                if self._session_pcm
+                else np.array([], dtype=np.float32)
+            )
+            final_text = self.engine.finalize_utterance(audio, self.draft)
+        elif self.draft:
             final_text = self.engine.finalize_text(self.draft)
-            if final_text and is_meaningful_text(final_text, self.config.min_partial_chars):
-                self.confirmed = (
-                    f"{self.confirmed} {final_text}".strip()
-                    if self.confirmed
-                    else final_text
-                )
-                out.final = final_text
+
+        if final_text and is_meaningful_text(final_text, min_chars):
+            self.confirmed = (
+                f"{self.confirmed} {final_text}".strip()
+                if self.confirmed
+                else final_text
+            )
+            out.final = final_text
 
         self.partial = ""
         self.draft = ""
         self.cache.clear()
+        self._pending_pcm.clear()
+        self._window_pcm.clear()
+        self._session_pcm.clear()
         self.last_voice_ts = time.time()
         return out
 
@@ -193,6 +200,8 @@ class StreamSession:
     ) -> str:
         for chunk in pcm_chunks:
             result = self.feed_pcm(chunk)
+            if result.session_too_long:
+                break
             if result.partial and on_partial:
                 on_partial(result.partial)
             if result.final and on_final:

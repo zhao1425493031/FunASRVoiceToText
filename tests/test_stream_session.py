@@ -9,10 +9,8 @@ import numpy as np
 import pytest
 
 from voicetotext.config import load_config
-from voicetotext.stream_session import (
-    StreamSession,
-    is_meaningful_text,
-)
+from voicetotext.stream_session import StreamSession
+from voicetotext.text_utils import is_meaningful_text
 
 
 class MockEngine:
@@ -36,6 +34,11 @@ class MockEngine:
 
     def finalize_text(self, text: str) -> str:
         return text + "。"
+
+    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        if audio.size > 0:
+            return "整段定稿。"
+        return self.finalize_text(draft_fallback)
 
 
 class SilentAwareEngine(MockEngine):
@@ -123,6 +126,23 @@ def test_finalize_uses_full_draft(session: StreamSession) -> None:
     result = session.finalize()
     assert result.final == "测试。"
     assert session.draft == ""
+
+
+def test_finalize_prefers_full_utterance(session: StreamSession) -> None:
+    session.draft = "流式草稿"
+    session._session_pcm.extend(b"\x00\x80" * 100)
+    result = session.finalize()
+    assert result.final == "整段定稿。"
+    assert len(session._session_pcm) == 0
+
+
+def test_session_pcm_overflow(config) -> None:
+    cfg = replace(config, session_pcm_max_seconds=1)
+    session = StreamSession(engine=MockEngine(), config=cfg)
+    max_bytes = cfg.session_pcm_max_bytes
+    session.feed_pcm(b"\x00" * max_bytes)
+    result = session.feed_pcm(b"\x00")
+    assert result.session_too_long is True
 
 
 def test_no_auto_finalize_on_silence_by_default(config) -> None:
