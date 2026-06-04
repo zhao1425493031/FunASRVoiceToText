@@ -10,7 +10,12 @@ import numpy as np
 from voicetotext.asr.punc_restorer import PuncRestorer
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
-from voicetotext.text_utils import audio_rms, is_meaningful_text, strip_model_tags
+from voicetotext.text_utils import (
+    audio_rms,
+    is_meaningful_text,
+    normalize_trailing_punctuation,
+    strip_model_tags,
+)
 
 logger = get_logger(__name__)
 
@@ -166,9 +171,10 @@ class SenseVoiceEngine:
         try:
             from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-            return rich_transcription_postprocess(text)
+            text = rich_transcription_postprocess(text)
         except Exception:
-            return text
+            pass
+        return normalize_trailing_punctuation(text)
 
     @staticmethod
     def _resample(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:

@@ -72,9 +72,12 @@ sequenceDiagram
   "type": "final",
   "mode": "offline_punc",
   "text": "…",
+  "draft": "…",
   "is_final": true
 }
 ```
+
+`text` 为定稿（标点/ITN）；`draft` 为停止前的流式草稿（无整段定稿加工），供演示页「识别原文」展示。业务提交仍以 `text` 为准。
 
 ### error（鉴权失败等）
 

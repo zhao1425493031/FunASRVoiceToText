@@ -125,6 +125,7 @@ def test_finalize_uses_full_draft(session: StreamSession) -> None:
     session.draft = "测试"
     result = session.finalize()
     assert result.final == "测试。"
+    assert result.draft == "测试"
     assert session.draft == ""
 
 

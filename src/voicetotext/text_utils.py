@@ -41,6 +41,19 @@ def strip_leading_punct(text: str) -> str:
     return _LEADING_PUNCT.sub("", text.strip())
 
 
+def normalize_trailing_punctuation(text: str) -> str:
+    """Remove weak pause marks before sentence endings (e.g. 需求，。 -> 需求。)."""
+    s = text.strip()
+    if not s:
+        return s
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r"[，,、；;：:]+([。．.!?！？]+)$", r"\1", s)
+    s = re.sub(r"([。．.!?！？])\1+$", r"\1", s)
+    return s
+
+
 def merge_utterance_segments(draft: str, segment: str) -> str:
     """Merge window ASR into one growing utterance without mid-sentence periods."""
     segment = segment.strip()

@@ -25,7 +25,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 1rem;
-  padding-bottom: 5.5rem;
+  padding-bottom: calc(7.5rem + env(safe-area-inset-bottom));
 }
 
 .header {
@@ -49,6 +49,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  padding-bottom: 1rem;
 }
 
 .panel {
@@ -75,6 +76,14 @@ body {
 
 .partial-display {
   color: var(--partial-color);
+}
+
+.partial-display.partial-frozen {
+  opacity: 0.92;
+}
+
+.final-panel {
+  scroll-margin-bottom: calc(6.5rem + env(safe-area-inset-bottom));
 }
 
 .final-list {
@@ -147,6 +156,10 @@ body {
 
 body.state-listening .subtitle {
   color: var(--accent);
+}
+
+body.state-finalizing .subtitle {
+  color: #fbbf24;
 }
 
 body.state-error .subtitle {

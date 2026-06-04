@@ -24,6 +24,7 @@
   let pcmBuffer = [];
   let awaitingFinal = false;
   let finalTimeoutId = null;
+  let lastDraft = "";
   const FINAL_WAIT_MS = 60000;
 
   function apiKeyFromQuery() {
@@ -40,10 +41,10 @@
     state = next;
     document.body.className = `state-${next}`;
     const labels = {
-      idle: "就绪",
-      listening: "正在识别…",
-      finalizing: "正在定稿…",
-      error: "出错",
+      idle: "待機",
+      listening: "認識中…",
+      finalizing: "確定稿を作成中…",
+      error: "エラー",
     };
     statusText.textContent = labels[next] || next;
     btnStart.disabled = next === "listening" || next === "finalizing";
@@ -130,7 +131,28 @@
   function applyDraftFallbackIfNeeded() {
     const draft = partialText.textContent;
     if (draft && draft !== "—" && finalList.childElementCount === 0) {
-      setSessionFinal(draft);
+      setSessionFinal(draft, draft);
+    }
+  }
+
+  function freezeDraftDisplay(draft) {
+    const text = (draft || lastDraft || "").trim();
+    if (text) {
+      partialText.textContent = text;
+    }
+    partialText.classList.add("partial-frozen");
+  }
+
+  function resetPartialDisplay() {
+    lastDraft = "";
+    partialText.textContent = "—";
+    partialText.classList.remove("partial-frozen");
+  }
+
+  function scrollToConfirmed() {
+    const panel = document.querySelector(".final-panel");
+    if (panel) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }
 
@@ -140,14 +162,15 @@
     div.className = "final-item";
     div.textContent = text.trim();
     finalList.appendChild(div);
-    partialText.textContent = "—";
   }
 
   /** One block per recording session (stop/end), not per silence-finalize. */
-  function setSessionFinal(text) {
+  function setSessionFinal(text, draft) {
     if (!text || !text.trim()) return;
     finalList.innerHTML = "";
     addFinalLine(text);
+    freezeDraftDisplay(draft);
+    scrollToConfirmed();
   }
 
   function handleServerMessage(raw) {
@@ -158,10 +181,11 @@
       return;
     }
     if (msg.type === "partial" && msg.text) {
+      partialText.classList.remove("partial-frozen");
+      lastDraft = msg.text;
       partialText.textContent = msg.text;
     } else if (msg.type === "final" && msg.text) {
-      setSessionFinal(msg.text);
-      partialText.textContent = msg.text;
+      setSessionFinal(msg.text, msg.draft);
       if (awaitingFinal) {
         finishStopSession();
       }
@@ -171,9 +195,9 @@
       if (msg.code === "session_too_long") {
         statusText.textContent =
           msg.message ||
-          "录音超过单次时长上限，请分段录制";
+          "録音が上限時間を超えました。分割して録音してください";
       } else {
-        statusText.textContent = msg.message || "服务器错误";
+        statusText.textContent = msg.message || "サーバーエラー";
       }
       if (wasListening) {
         stopAudio();
@@ -194,10 +218,12 @@
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       if (!secure && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
         throw new Error(
-          "手机/浏览器需要 HTTPS 才能使用麦克风。请用 https://<电脑IP>:8765 访问，并先运行 python scripts/generate_cert.py --ip <电脑IP>"
+          "スマホ／ブラウザでは HTTPS が必要です。https://<PCのIP>:8765 でアクセスし、先に python scripts/generate_cert.py --ip <PCのIP> を実行してください"
         );
       }
-      throw new Error("当前浏览器不支持麦克风 API，请换 Chrome/Safari 或使用 HTTPS");
+      throw new Error(
+        "このブラウザはマイク API に対応していません。Chrome／Safari または HTTPS をご利用ください"
+      );
     }
   }
 
@@ -274,7 +300,7 @@
           handleServerMessage(ev.data);
         }
       };
-      ws.onerror = () => reject(new Error("WebSocket 连接失败"));
+      ws.onerror = () => reject(new Error("WebSocket 接続に失敗しました"));
       ws.onclose = () => {
         if (awaitingFinal) {
           applyDraftFallbackIfNeeded();
@@ -292,6 +318,7 @@
   async function startRecognition() {
     try {
       ensureMicrophoneApi();
+      resetPartialDisplay();
       setState("listening");
       await connectWebSocket();
       await startAudio();
@@ -330,6 +357,6 @@
   btnStop.addEventListener("click", stopRecognition);
   btnClear.addEventListener("click", () => {
     finalList.innerHTML = "";
-    partialText.textContent = "—";
+    resetPartialDisplay();
   });
 })();

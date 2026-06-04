@@ -9,6 +9,7 @@ import numpy as np
 
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
+from voicetotext.text_utils import normalize_trailing_punctuation
 
 logger = get_logger(__name__)
 
@@ -79,14 +80,17 @@ class ParaformerEngine:
 
     def finalize_text(self, text: str) -> str:
         stripped = text.strip()
-        if not stripped or not self.config.punc_model:
+        if not stripped:
             return stripped
+        if not self.config.punc_model:
+            return normalize_trailing_punctuation(stripped)
         try:
             result = self.model.generate(input=stripped, task="punc")
-            return self._extract_text(result) or stripped
+            out = self._extract_text(result) or stripped
+            return normalize_trailing_punctuation(out)
         except Exception:
             logger.exception("Punctuation failed")
-            return stripped
+            return normalize_trailing_punctuation(stripped)
 
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         if sample_rate != self.config.sample_rate:

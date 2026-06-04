@@ -192,7 +192,7 @@ class WSProtocolHandler:
                 )
             )
         if result.final:
-            await self._send_final(result.final)
+            await self._send_final(result.final, result.draft)
 
     async def _handle_end(self) -> None:
         if self._use_runtime:
@@ -206,7 +206,7 @@ class WSProtocolHandler:
                 result = await asyncio.to_thread(self.session.finalize)
             if result.final:
                 try:
-                    await self._send_final(result.final)
+                    await self._send_final(result.final, result.draft)
                 except Exception as exc:
                     logger.warning("Could not send final (client may have disconnected): %s", exc)
             else:
@@ -216,17 +216,16 @@ class WSProtocolHandler:
         self.started = False
         logger.info("Session ended by client")
 
-    async def _send_final(self, text: str) -> None:
-        await self.websocket.send_text(
-            encode_message(
-                {
-                    "type": "final",
-                    "mode": "offline_punc",
-                    "text": text,
-                    "is_final": True,
-                }
-            )
-        )
+    async def _send_final(self, text: str, draft: str | None = None) -> None:
+        payload: dict[str, Any] = {
+            "type": "final",
+            "mode": "offline_punc",
+            "text": text,
+            "is_final": True,
+        }
+        if draft:
+            payload["draft"] = draft
+        await self.websocket.send_text(encode_message(payload))
 
     async def cleanup(self) -> None:
         if self.runtime_session is not None:

@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 class SessionResult:
     partial: str | None = None
     final: str | None = None
+    draft: str | None = None
     session_too_long: bool = False
 
 
@@ -174,6 +175,9 @@ class StreamSession:
             final_text = self.engine.finalize_utterance(audio, self.draft)
         elif self.draft:
             final_text = self.engine.finalize_text(self.draft)
+
+        if self.draft:
+            out.draft = self.draft
 
         if final_text and is_meaningful_text(final_text, min_chars):
             self.confirmed = (

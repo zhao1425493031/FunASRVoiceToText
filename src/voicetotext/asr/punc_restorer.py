@@ -6,7 +6,7 @@ from typing import Any
 
 from voicetotext.config import AppConfig
 from voicetotext.logging_setup import get_logger
-from voicetotext.text_utils import strip_model_tags
+from voicetotext.text_utils import normalize_trailing_punctuation, strip_model_tags
 
 logger = get_logger(__name__)
 
@@ -43,7 +43,8 @@ class PuncRestorer:
             return stripped
         try:
             result = self.model.generate(input=stripped, task="punc")
-            return _extract_text(result) or stripped
+            out = _extract_text(result) or stripped
+            return normalize_trailing_punctuation(out)
         except Exception:
             logger.exception("ct-punc restore failed")
             return stripped

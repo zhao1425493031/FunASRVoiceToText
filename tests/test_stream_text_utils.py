@@ -2,6 +2,7 @@
 
 from voicetotext.text_utils import (
     merge_utterance_segments,
+    normalize_trailing_punctuation,
     strip_model_tags,
     strip_trailing_punct,
 )
@@ -23,3 +24,9 @@ def test_merge_segment_extends() -> None:
 
 def test_strip_trailing_punct() -> None:
     assert strip_trailing_punct("测试。") == "测试"
+
+
+def test_normalize_trailing_punctuation() -> None:
+    assert normalize_trailing_punctuation("场景需求，。") == "场景需求。"
+    assert normalize_trailing_punctuation("你好。。") == "你好。"
+    assert normalize_trailing_punctuation("结束") == "结束"
