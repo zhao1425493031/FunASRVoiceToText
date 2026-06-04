@@ -163,11 +163,16 @@ async def websocket_meeting_asr(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         logger.info("Meeting WebSocket disconnected from %s", client)
     except Exception as exc:
-        logger.exception("Meeting WebSocket error: %s", exc)
-        try:
-            await send_error(websocket, "server_error", str(exc))
-        except Exception:
-            pass
+        from voicetotext.server.protocol_common import is_websocket_disconnected
+
+        if is_websocket_disconnected(exc):
+            logger.info("Meeting WebSocket closed during send from %s", client)
+        else:
+            logger.exception("Meeting WebSocket error: %s", exc)
+            try:
+                await send_error(websocket, "server_error", str(exc))
+            except Exception:
+                pass
     finally:
         await handler.cleanup()
         async with _ws_connection_lock:

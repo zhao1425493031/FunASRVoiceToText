@@ -45,12 +45,17 @@ class AppConfig:
     meeting_max_speakers: int
     meeting_session_max_seconds: int
     meeting_use_diarization: bool
+    meeting_spk_mode: str
+    meeting_spk_new_speaker_max_sim: float
+    meeting_min_finalize_chars: int
     meeting_emit_partial: bool
     meeting_partial_interval_ms: int
     meeting_partial_min_ms: int
     meeting_min_utterance_ms: int
     vad_silence_long_ms: int
     meeting_spk_model: str
+    meeting_spk_similarity_threshold: float
+    meeting_spk_min_audio_ms: int
     meeting_vad_model: str
 
     @property
@@ -205,6 +210,11 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_max_speakers=int(raw.get("meeting_max_speakers", 8)),
         meeting_session_max_seconds=int(raw.get("meeting_session_max_seconds", 7200)),
         meeting_use_diarization=bool(raw.get("meeting_use_diarization", True)),
+        meeting_spk_mode=str(raw.get("meeting_spk_mode", "multi")).lower(),
+        meeting_spk_new_speaker_max_sim=float(
+            raw.get("meeting_spk_new_speaker_max_sim", 0.42)
+        ),
+        meeting_min_finalize_chars=int(raw.get("meeting_min_finalize_chars", 10)),
         meeting_emit_partial=bool(raw.get("meeting_emit_partial", True)),
         meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 2000)),
         meeting_partial_min_ms=int(raw.get("meeting_partial_min_ms", 800)),
@@ -213,5 +223,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_spk_model=str(
             raw.get("meeting_spk_model", "iic/speech_campplus_sv_zh-cn_16k-common")
         ),
+        meeting_spk_similarity_threshold=float(
+            raw.get("meeting_spk_similarity_threshold", 0.55)
+        ),
+        meeting_spk_min_audio_ms=int(raw.get("meeting_spk_min_audio_ms", 500)),
         meeting_vad_model=str(raw.get("meeting_vad_model", "fsmn-vad")),
     )

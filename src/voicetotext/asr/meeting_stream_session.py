@@ -77,8 +77,24 @@ class MeetingStreamSession:
             return np.array([], dtype=np.float32)
         return np.concatenate(self._utterance_chunks)
 
+    def _utterance_pcm_bytes(self) -> bytes:
+        audio = self._concat_utterance()
+        if audio.size == 0:
+            return b""
+        int16 = (np.clip(audio, -1.0, 1.0) * 32767.0).astype(np.int16)
+        return int16.tobytes()
+
     def _silence_elapsed_ms(self) -> float:
         return (time.time() - self._last_voice_ts) * 1000.0
+
+    def _should_defer_finalize(self, text: str) -> bool:
+        """Avoid locking short clauses like 「关于上周。」 as separate finals."""
+        spoken_ms = self._utterance_duration_ms()
+        min_chars = self.config.meeting_min_finalize_chars
+        min_ms = self.config.meeting_min_utterance_ms
+        if len(text.strip()) < min_chars and spoken_ms < min_ms:
+            return True
+        return False
 
     def _can_finalize(self) -> bool:
         """Avoid cutting one sentence on brief pauses (<0.5s) while speaking."""
@@ -116,13 +132,13 @@ class MeetingStreamSession:
             t_end_ms=t_end_ms or self._elapsed_ms(),
             is_final=is_final,
         )
-        pcm_window = (
-            bytes(self._pcm_ring)
-            if is_final and self.config.meeting_use_diarization
-            else None
+        use_spk = (
+            self.config.meeting_spk_mode == "multi"
+            and self.config.meeting_use_diarization
         )
+        pcm_utterance = self._utterance_pcm_bytes() if use_spk else None
         speaker_id, t_start, t_end, speaker_changed = self._assigner.assign(
-            runtime_msg, pcm_window=pcm_window
+            runtime_msg, pcm_utterance=pcm_utterance or None
         )
         if t_start is None:
             t_start = t_start_ms
@@ -130,7 +146,12 @@ class MeetingStreamSession:
             t_end = t_end_ms or self._elapsed_ms()
 
         out: list[dict[str, Any]] = []
-        if speaker_changed and is_final:
+        if (
+            speaker_changed
+            and is_final
+            and self.config.meeting_spk_mode == "multi"
+            and self.config.meeting_use_diarization
+        ):
             out.append(
                 {
                     "type": "speaker_change",
@@ -209,6 +230,10 @@ class MeetingStreamSession:
         text = self.engine.finalize_utterance(utterance, self._last_partial_text)
         if not text:
             self._reset_utterance()
+            return []
+
+        if self._should_defer_finalize(text):
+            logger.debug("Defer finalize (short fragment): %s", text[:32])
             return []
 
         out = self._map_text(

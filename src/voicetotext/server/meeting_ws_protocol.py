@@ -7,13 +7,20 @@ import time
 from typing import Any
 
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from voicetotext.asr.base import ASRBackend
 from voicetotext.asr.meeting_stream_session import MeetingStreamSession
 from voicetotext.config import AppConfig
 from voicetotext.logging_setup import get_logger
 from voicetotext.server.auth import extract_ws_api_key, validate_meeting_api_key
-from voicetotext.server.protocol_common import encode_message, parse_client_message, send_error
+from voicetotext.server.protocol_common import (
+    encode_message,
+    is_websocket_disconnected,
+    parse_client_message,
+    send_error,
+    send_json_safe,
+)
 
 logger = get_logger(__name__)
 
@@ -44,19 +51,23 @@ class MeetingWSSession:
         )
         logger.info("Meeting session started (embedded)")
 
-    async def send_pcm(self, data: bytes) -> None:
-        if self._stream is None:
-            return
-        messages = await asyncio.to_thread(self._stream.feed_pcm, data)
+    async def _send_messages(self, messages: list[dict[str, Any]]) -> bool:
         for mapped in messages:
-            await self.websocket.send_text(encode_message(mapped))
+            if not await send_json_safe(self.websocket, mapped):
+                return False
+        return True
 
-    async def end(self) -> None:
+    async def send_pcm(self, data: bytes) -> bool:
         if self._stream is None:
-            return
+            return True
+        messages = await asyncio.to_thread(self._stream.feed_pcm, data)
+        return await self._send_messages(messages)
+
+    async def end(self) -> bool:
+        if self._stream is None:
+            return True
         messages = await asyncio.to_thread(self._stream.finalize_all)
-        for mapped in messages:
-            await self.websocket.send_text(encode_message(mapped))
+        return await self._send_messages(messages)
 
     async def close(self) -> None:
         self._stream = None
@@ -185,10 +196,19 @@ class MeetingWSProtocolHandler:
         if self.asr_session is None:
             return
         try:
-            await self.asr_session.send_pcm(data)
+            if not await self.asr_session.send_pcm(data):
+                self.started = False
+        except WebSocketDisconnect:
+            self.started = False
         except Exception as exc:
-            logger.exception("Meeting ASR send failed: %s", exc)
-            await send_error(self.websocket, "asr_error", str(exc))
+            if is_websocket_disconnected(exc):
+                self.started = False
+                return
+            logger.warning("Meeting ASR send failed: %s", exc)
+            try:
+                await send_error(self.websocket, "asr_error", str(exc))
+            except Exception:
+                self.started = False
 
     async def _handle_end(self) -> None:
         if self.asr_session is not None:

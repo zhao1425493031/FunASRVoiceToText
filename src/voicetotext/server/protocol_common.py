@@ -24,7 +24,31 @@ def parse_client_message(raw: str) -> dict[str, Any]:
     return data
 
 
+def is_websocket_disconnected(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name in ("WebSocketDisconnect", "ClientDisconnected"):
+        return True
+    if isinstance(exc, RuntimeError) and "close message has been sent" in str(exc):
+        return True
+    return False
+
+
+async def send_json_safe(websocket: WebSocket, payload: dict[str, Any]) -> bool:
+    """Send JSON text; return False if client already disconnected."""
+    from starlette.websockets import WebSocketDisconnect
+
+    try:
+        await websocket.send_text(encode_message(payload))
+        return True
+    except WebSocketDisconnect:
+        return False
+    except RuntimeError as exc:
+        if is_websocket_disconnected(exc):
+            return False
+        raise
+
+
 async def send_error(websocket: WebSocket, code: str, message: str) -> None:
-    await websocket.send_text(
-        encode_message({"type": "error", "code": code, "message": message})
+    await send_json_safe(
+        websocket, {"type": "error", "code": code, "message": message}
     )

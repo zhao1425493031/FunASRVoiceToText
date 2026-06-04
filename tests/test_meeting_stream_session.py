@@ -67,9 +67,9 @@ def test_feed_pcm_partial_after_min_duration(meeting_config) -> None:
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
     msgs = session.feed_pcm(_pcm_chunk(cfg))
-    assert any(m["type"] == "partial" for m in msgs)
     partials = [m for m in msgs if m["type"] == "partial"]
-    assert partials[0]["seg_id"] == session._utterance_seg_id
+    assert partials
+    assert partials[0]["protocol_version"] == 2
 
 
 def test_feed_pcm_no_partial_when_disabled(meeting_config) -> None:

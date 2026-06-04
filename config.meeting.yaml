@@ -1,4 +1,4 @@
-# 多人会议实时字幕（纯 Python / Windows）
+# 企业会议实时字幕
 # 启动: python scripts/run_meeting.py
 
 host: "0.0.0.0"
@@ -9,10 +9,10 @@ asr_model: "iic/SenseVoiceSmall"
 device: "cpu"
 language: "zh"
 vad_energy_threshold: 0.008
-# 正常句末静音；短片段需更长的静音才切句（避免「确认|一下」被拆成两行）
-vad_silence_ms: 1100
-vad_silence_long_ms: 2200
-meeting_min_utterance_ms: 900
+vad_silence_ms: 1300
+vad_silence_long_ms: 2400
+meeting_min_utterance_ms: 1400
+meeting_min_finalize_chars: 12
 min_partial_chars: 1
 meeting_emit_partial: true
 meeting_partial_interval_ms: 2000
@@ -29,8 +29,18 @@ max_ws_connections: 10
 
 meeting_max_speakers: 8
 meeting_session_max_seconds: 7200
+
+# 说话人模式（重要）
+# single = 单人/演讲，固定 [話者1]（推荐你先用这个验证）
+# multi  = 多人圆桌，cam++ 声纹聚类
+meeting_spk_mode: single
 meeting_use_diarization: false
+
+# 仅 meeting_spk_mode: multi 时生效
 meeting_spk_model: "iic/speech_campplus_sv_zh-cn_16k-common"
+meeting_spk_similarity_threshold: 0.55
+meeting_spk_new_speaker_max_sim: 0.42
+meeting_spk_min_audio_ms: 500
 
 ssl_certfile: "certs/cert.pem"
 ssl_keyfile: "certs/key.pem"
