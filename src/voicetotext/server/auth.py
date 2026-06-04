@@ -21,6 +21,17 @@ def validate_api_key(config: AppConfig, provided: str | None) -> bool:
     return provided == config.api_key
 
 
+def validate_meeting_api_key(config: AppConfig, provided: str | None) -> bool:
+    if not validate_api_key(config, provided):
+        return False
+    if not config.is_meeting_service:
+        return True
+    scopes = config.api_key_scopes
+    if not scopes:
+        return True
+    return "meeting" in scopes
+
+
 def extract_header_api_key(headers: Mapping[str, str]) -> str | None:
     for name in ("x-api-key", "X-API-Key", "X-Api-Key"):
         value = headers.get(name)

@@ -1,0 +1,33 @@
+# 多人会议实时字幕（纯 Python / Windows）
+# 启动: python scripts/run_meeting.py
+# 手机访问会自动带上 ?key=（也可手动复制完整 URL）
+
+host: "0.0.0.0"
+port: 8766
+service_mode: "meeting"
+asr_backend: "embedded"
+asr_model: "iic/SenseVoiceSmall"
+device: "cpu"
+language: "zh"
+vad_energy_threshold: 0.008
+vad_silence_ms: 900
+min_partial_chars: 1
+# SenseVoice 按句识别；false=仅句末一条字幕，避免 partial/final 重复
+meeting_emit_partial: false
+
+chunk_size: [0, 10, 5]
+sample_rate: 16000
+log_dir: "logs"
+
+api_key: "meeting-dev-7k9m2p4x"
+api_key_scopes:
+  - meeting
+max_ws_connections: 10
+
+meeting_max_speakers: 8
+meeting_session_max_seconds: 7200
+meeting_use_diarization: true
+meeting_spk_model: "iic/speech_campplus_sv_zh-cn_16k-common"
+
+ssl_certfile: "certs/cert.pem"
+ssl_keyfile: "certs/key.pem"

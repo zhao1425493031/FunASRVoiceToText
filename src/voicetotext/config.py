@@ -10,7 +10,7 @@ from typing import Any
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.yaml"
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config.meeting.yaml"
 
 
 @dataclass(frozen=True)
@@ -38,14 +38,20 @@ class AppConfig:
     trust_remote_code: bool
     api_key: str | None
     max_ws_connections: int
-    runtime_host: str
-    runtime_port: int
-    runtime_mode: str
-    runtime_chunk_size: str
-    runtime_ssl: bool
-    model_hub: str
     session_pcm_max_seconds: int
     ja_apply_punctuation: bool
+    service_mode: str
+    api_key_scopes: tuple[str, ...]
+    meeting_max_speakers: int
+    meeting_session_max_seconds: int
+    meeting_use_diarization: bool
+    meeting_emit_partial: bool
+    meeting_spk_model: str
+    meeting_vad_model: str
+
+    @property
+    def is_meeting_service(self) -> bool:
+        return self.service_mode.lower() == "meeting"
 
     @property
     def chunk_stride_samples(self) -> int:
@@ -116,6 +122,28 @@ def _optional_str(value: Any) -> str | None:
     return str(value)
 
 
+def _coerce_str_list(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value.strip(),) if value.strip() else ()
+    if isinstance(value, list):
+        return tuple(str(v).strip() for v in value if str(v).strip())
+    return ()
+
+
+def _validate_config(raw: dict[str, Any]) -> None:
+    service_mode = str(raw.get("service_mode", "meeting")).lower()
+    asr_backend = str(raw.get("asr_backend", "embedded")).lower()
+    if service_mode != "meeting":
+        raise ValueError("This project only supports service_mode=meeting")
+    if asr_backend != "embedded":
+        raise ValueError("Meeting service requires asr_backend=embedded")
+    lang = str(raw.get("language", "ja")).lower()
+    if lang not in ("ja", "zh", "auto"):
+        raise ValueError(f"Unsupported language: {lang}")
+
+
 def resolve_config_path(path: Path | None = None) -> Path:
     if path is not None:
         return path
@@ -133,6 +161,11 @@ def load_config(path: Path | None = None) -> AppConfig:
     with config_path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
+    _validate_config(raw)
+
+    service_mode = str(raw.get("service_mode", "meeting")).lower()
+    is_meeting = True
+
     port = int(raw.get("port", 8765))
     if not (1 <= port <= 65535):
         raise ValueError(f"Invalid port: {port}")
@@ -140,12 +173,12 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(
         host=str(raw.get("host", "0.0.0.0")),
         port=port,
-        asr_backend=str(raw.get("asr_backend", "sensevoice")),
+        asr_backend=str(raw.get("asr_backend", "embedded")),
         asr_model=str(raw.get("asr_model", "iic/SenseVoiceSmall")),
         vad_model=str(raw.get("vad_model", "fsmn-vad")),
         punc_model=str(raw.get("punc_model", "")),
         language=str(raw.get("language", "ja")),
-        device=str(raw.get("device", "auto")),
+        device=str(raw.get("device", "cpu" if is_meeting else "auto")),
         chunk_size=_coerce_int_list(raw.get("chunk_size", [0, 10, 5]), "chunk_size"),
         encoder_chunk_look_back=int(raw.get("encoder_chunk_look_back", 4)),
         decoder_chunk_look_back=int(raw.get("decoder_chunk_look_back", 1)),
@@ -161,12 +194,16 @@ def load_config(path: Path | None = None) -> AppConfig:
         trust_remote_code=bool(raw.get("trust_remote_code", True)),
         api_key=_optional_str(raw.get("api_key")),
         max_ws_connections=int(raw.get("max_ws_connections", 20)),
-        runtime_host=str(raw.get("runtime_host", "127.0.0.1")),
-        runtime_port=int(raw.get("runtime_port", 10095)),
-        runtime_mode=str(raw.get("runtime_mode", "2pass")),
-        runtime_chunk_size=str(raw.get("runtime_chunk_size", "5,10,5")),
-        runtime_ssl=bool(raw.get("runtime_ssl", False)),
-        model_hub=str(raw.get("model_hub", "ms")),
         session_pcm_max_seconds=int(raw.get("session_pcm_max_seconds", 600)),
-        ja_apply_punctuation=bool(raw.get("ja_apply_punctuation", True)),
+        ja_apply_punctuation=bool(raw.get("ja_apply_punctuation", False)),
+        service_mode=service_mode,
+        api_key_scopes=_coerce_str_list(raw.get("api_key_scopes")),
+        meeting_max_speakers=int(raw.get("meeting_max_speakers", 8)),
+        meeting_session_max_seconds=int(raw.get("meeting_session_max_seconds", 7200)),
+        meeting_use_diarization=bool(raw.get("meeting_use_diarization", True)),
+        meeting_emit_partial=bool(raw.get("meeting_emit_partial", False)),
+        meeting_spk_model=str(
+            raw.get("meeting_spk_model", "iic/speech_campplus_sv_zh-cn_16k-common")
+        ),
+        meeting_vad_model=str(raw.get("meeting_vad_model", "fsmn-vad")),
     )

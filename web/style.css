@@ -42,6 +42,11 @@ body {
   color: var(--muted);
   font-size: 0.875rem;
   margin-top: 0.35rem;
+  white-space: pre-line;
+  line-height: 1.45;
+  max-width: 36rem;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .main {
@@ -152,6 +157,18 @@ body {
   font-size: 0.75rem;
   color: var(--muted);
   margin-top: 0.5rem;
+  padding: 0 0.5rem 4.5rem;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.hint.hint-warn {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+body.state-connecting .subtitle {
+  color: #fbbf24;
 }
 
 body.state-listening .subtitle {

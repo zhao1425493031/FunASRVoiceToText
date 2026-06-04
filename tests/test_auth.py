@@ -12,20 +12,20 @@ from voicetotext.server.auth import (
     extract_ws_api_key,
     require_http_api_key,
     validate_api_key,
+    validate_meeting_api_key,
 )
 
 
 def test_validate_no_key_config() -> None:
-    cfg = load_config()
+    cfg = replace(load_config(), api_key=None)
     assert validate_api_key(cfg, None) is True
-    assert validate_api_key(cfg, "anything") is True
 
 
 def test_validate_with_key_config() -> None:
-    cfg = replace(load_config(), api_key="secret")
+    cfg = replace(load_config(), api_key="secret", api_key_scopes=("meeting",))
     assert validate_api_key(cfg, "secret") is True
+    assert validate_meeting_api_key(cfg, "secret") is True
     assert validate_api_key(cfg, "wrong") is False
-    assert validate_api_key(cfg, None) is False
 
 
 def test_extract_ws_api_key_from_message() -> None:
@@ -35,6 +35,12 @@ def test_extract_ws_api_key_from_message() -> None:
 
 def test_extract_ws_api_key_from_header() -> None:
     assert extract_ws_api_key({}, {"x-api-key": "hdr"}) == "hdr"
+
+
+def test_meeting_scope_required() -> None:
+    cfg = load_config()
+    no_scope = replace(cfg, api_key_scopes=("single",))
+    assert validate_meeting_api_key(no_scope, cfg.api_key) is False
 
 
 def test_require_http_api_key_raises() -> None:
