@@ -82,7 +82,11 @@ async def meeting_page(request: Request) -> HTMLResponse | RedirectResponse:
     html_path = web_root / "meeting.html"
     html = html_path.read_text(encoding="utf-8")
     key_js = (config.api_key or "").replace("\\", "\\\\").replace('"', '\\"')
-    inject = f'<script>window.__MEETING_API_KEY__="{key_js}";</script>'
+    spk_mode = config.meeting_spk_mode.replace("\\", "\\\\").replace('"', '\\"')
+    inject = (
+        f'<script>window.__MEETING_API_KEY__="{key_js}";'
+        f'window.__MEETING_SPK_MODE__="{spk_mode}";</script>'
+    )
     if "</head>" in html:
         html = html.replace("</head>", f"{inject}\n</head>", 1)
     else:

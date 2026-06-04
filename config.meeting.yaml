@@ -9,10 +9,10 @@ asr_model: "iic/SenseVoiceSmall"
 device: "cpu"
 language: "zh"
 vad_energy_threshold: 0.008
-vad_silence_ms: 1300
-vad_silence_long_ms: 2400
-meeting_min_utterance_ms: 1400
-meeting_min_finalize_chars: 12
+vad_silence_ms: 1500
+vad_silence_long_ms: 2600
+meeting_min_utterance_ms: 1600
+meeting_min_finalize_chars: 15
 min_partial_chars: 1
 meeting_emit_partial: true
 meeting_partial_interval_ms: 2000
@@ -31,10 +31,10 @@ meeting_max_speakers: 8
 meeting_session_max_seconds: 7200
 
 # 说话人模式（重要）
-# single = 单人/演讲，固定 [話者1]（推荐你先用这个验证）
+# single = 仅一个话者（固定 ID，页面不显示 [話者1] 前缀）
 # multi  = 多人圆桌，cam++ 声纹聚类
-meeting_spk_mode: single
-meeting_use_diarization: false
+meeting_spk_mode: multi
+meeting_use_diarization: true
 
 # 仅 meeting_spk_mode: multi 时生效
 meeting_spk_model: "iic/speech_campplus_sv_zh-cn_16k-common"

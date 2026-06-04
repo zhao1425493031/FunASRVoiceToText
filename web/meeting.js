@@ -34,6 +34,16 @@
     return apiKeyFromQuery() || window.__MEETING_API_KEY__ || "";
   }
 
+  function isSingleSpeakerMode() {
+    return (window.__MEETING_SPK_MODE__ || "single") === "single";
+  }
+
+  function speakerPrefix(msg) {
+    if (isSingleSpeakerMode()) return "";
+    const spk = msg.speaker_id != null ? msg.speaker_id : 0;
+    return `[話者${spk + 1}] `;
+  }
+
   function ensureUrlHasKey() {
     const key = resolvedApiKey();
     if (!key || apiKeyFromQuery()) return;
@@ -154,10 +164,8 @@
       subtitleList.appendChild(row);
       linesBySegId.set(segId, row);
     }
-    const spk = msg.speaker_id != null ? msg.speaker_id : 0;
-    const prefix = `[話者${spk + 1}] `;
     const draft = msg.type === "partial" ? " …" : "";
-    row.textContent = prefix + (msg.text || "") + draft;
+    row.textContent = speakerPrefix(msg) + (msg.text || "") + draft;
     if (msg.type === "final") {
       row.classList.add("subtitle-final");
       row.classList.remove("subtitle-partial");
@@ -194,7 +202,7 @@
     }
     if (msg.type === "pong") return;
     if (msg.type === "speaker_change") {
-      if (state === "listening") {
+      if (state === "listening" && !isSingleSpeakerMode()) {
         setStatusText(`字幕認識中…（話者${(msg.speaker_id || 0) + 1}）`);
       }
       return;
@@ -361,7 +369,12 @@
     try {
       await connectWebSocket();
       setState("listening");
-      setHint("話している間は1行が更新されます。文の終わりで約1秒止めると確定します。", false);
+      setHint(
+        isSingleSpeakerMode()
+          ? "話したあと約1.3秒止めると1行確定します（単一話者）。"
+          : "話している間は1行が更新されます。文の終わりで約1秒止めると確定します。",
+        false
+      );
       startPing();
       await startAudio();
     } catch (err) {
@@ -371,7 +384,8 @@
 
   function updateKeyHint() {
     if (resolvedApiKey()) {
-      setHint("「字幕開始」を押すと「字幕認識中…」のままマイクが有効になります。", false);
+      const spkNote = isSingleSpeakerMode() ? "（単一話者）" : "";
+      setHint(`「字幕開始」を押すと「字幕認識中…」のままマイクが有効になります。${spkNote}`, false);
     } else {
       setHint("API Key 未設定。サーバー設定を確認してください。", true);
     }
