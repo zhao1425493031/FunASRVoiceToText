@@ -14,7 +14,8 @@ from voicetotext.config import load_config
 
 @pytest.fixture
 def engine():
-    return SenseVoiceEngine(load_config())
+    cfg = replace(load_config(), language="zh", ja_apply_punctuation=False)
+    return SenseVoiceEngine(cfg)
 
 
 def _load_mock(engine: SenseVoiceEngine, generate_side_effect) -> MagicMock:
@@ -34,7 +35,7 @@ def test_transcribe_utterance_uses_itn(engine: SenseVoiceEngine) -> None:
 
 
 def test_finalize_utterance_falls_back_to_punc(engine: SenseVoiceEngine) -> None:
-    cfg = replace(load_config(), punc_model="ct-punc")
+    cfg = replace(load_config(), punc_model="ct-punc", language="zh")
     engine = SenseVoiceEngine(cfg)
     _load_mock(engine, [{"text": ""}])
 

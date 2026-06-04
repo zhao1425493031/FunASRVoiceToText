@@ -11,7 +11,7 @@
 
 本文档**合并了安装说明与按顺序操作手顺**。企业配置见 [`config.enterprise.yaml`](config.enterprise.yaml)；公开发布定稿见 [`doc/企业公开发布实施方案.md`](doc/企业公开发布实施方案.md)；技术方案见 [`doc/企业日语生产方案.md`](doc/企业日语生产方案.md)。
 
-**关键配置（公开发布）：** `session_pcm_max_seconds: 600`（单次录音上限）、`punc_model: ct-punc`（定稿标点兜底）、`auto_finalize_on_silence: false`（仅 `end` 定稿）。
+**关键配置（公开发布）：** `session_pcm_max_seconds: 600`、`language: ja`、`ja_apply_punctuation: true`（日语定稿 `、` `。`）、日语请设 `punc_model: ""`（勿用 ct-punc）、`auto_finalize_on_silence: false`。企业级日文标点终态见 [`doc/企业日语标点.md`](doc/企业日语标点.md)（Runtime 2pass 推荐）。
 
 ---
 

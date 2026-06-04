@@ -41,6 +41,51 @@ def strip_leading_punct(text: str) -> str:
     return _LEADING_PUNCT.sub("", text.strip())
 
 
+_JA_PUNCT_CHARS = "、。．.!?！？…"
+_JA_SPACE_RUN = re.compile(r"[\s\u3000]+")
+# Clause/sentence endings before a space → 。；otherwise → 、
+_JA_SENTENCE_END_BEFORE_SPACE = re.compile(
+    r"(?:です|ます|でした|ません|でしょう|ましょう|ございます|だ|った|ない|れます|けます|せます|てます)$"
+)
+
+
+def has_japanese_punctuation(text: str) -> bool:
+    return any(ch in text for ch in _JA_PUNCT_CHARS)
+
+
+def _punctuation_for_space_break(left: str) -> str:
+    """Choose 。 after complete clauses (です/ます…), else 、 for phrase breaks."""
+    if _JA_SENTENCE_END_BEFORE_SPACE.search(left):
+        return "。"
+    return "、"
+
+
+def apply_japanese_punctuation(text: str) -> str:
+    """Turn SenseVoice JA ITN phrase spaces into 、/。 for readable finals."""
+    s = text.strip()
+    if not s:
+        return s
+    if has_japanese_punctuation(s) and " " not in s and "\u3000" not in s:
+        return normalize_trailing_punctuation(s)
+    if not _JA_SPACE_RUN.search(s):
+        if s and s[-1] not in _JA_PUNCT_CHARS:
+            s = s + "。"
+        return normalize_trailing_punctuation(s)
+
+    parts = [p for p in _JA_SPACE_RUN.split(s) if p]
+    if not parts:
+        return s
+    out = parts[0]
+    for part in parts[1:]:
+        out += _punctuation_for_space_break(out) + part
+    out = re.sub(r"、+", "、", out)
+    out = re.sub(r"。+", "。", out)
+    out = re.sub(r"、。", "。", out)
+    if out and out[-1] not in _JA_PUNCT_CHARS:
+        out += "。"
+    return normalize_trailing_punctuation(out)
+
+
 def normalize_trailing_punctuation(text: str) -> str:
     """Remove weak pause marks before sentence endings (e.g. 需求，。 -> 需求。)."""
     s = text.strip()

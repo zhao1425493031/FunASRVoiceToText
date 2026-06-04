@@ -11,6 +11,7 @@ from voicetotext.asr.punc_restorer import PuncRestorer
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
 from voicetotext.text_utils import (
+    apply_japanese_punctuation,
     audio_rms,
     is_meaningful_text,
     normalize_trailing_punctuation,
@@ -103,27 +104,35 @@ class SenseVoiceEngine:
             )
         return text
 
+    def _generate_utterance(self, audio: np.ndarray, cache: dict) -> Any:
+        base = dict(
+            input=audio,
+            cache=cache,
+            language=self.config.language,
+            use_itn=True,
+            is_final=True,
+        )
+        optional = dict(
+            batch_size_s=min(self.config.session_pcm_max_seconds, 300),
+            merge_vad=True,
+            merge_length_s=15,
+        )
+        try:
+            return self.model.generate(**base, **optional)
+        except TypeError:
+            try:
+                return self.model.generate(**base)
+            except TypeError:
+                base.pop("is_final", None)
+                return self.model.generate(**base)
+
     def transcribe_utterance(self, audio: np.ndarray) -> str:
         """Full-session pass with ITN for authoritative final text."""
         if audio.size == 0:
             return ""
         t0 = time.perf_counter()
         cache: dict = {}
-        try:
-            result = self.model.generate(
-                input=audio,
-                cache=cache,
-                language=self.config.language,
-                use_itn=True,
-                is_final=True,
-            )
-        except TypeError:
-            result = self.model.generate(
-                input=audio,
-                cache=cache,
-                language=self.config.language,
-                use_itn=True,
-            )
+        result = self._generate_utterance(audio, cache)
         text = self._postprocess(self._extract_text(result))
         if text:
             logger.info(
@@ -143,14 +152,18 @@ class SenseVoiceEngine:
             logger.warning("Full utterance ASR returned empty or trivial text")
 
         fallback = strip_model_tags(draft_fallback.strip())
-        if fallback and self.config.punc_model:
+        if fallback and self.config.punc_model and self.config.language.lower() in (
+            "zh",
+            "yue",
+            "en",
+        ):
             logger.warning("Applying ct-punc fallback on streaming draft len=%d", len(fallback))
             restored = self._punc_restorer.restore(fallback)
             if restored and is_meaningful_text(restored, min_chars):
                 return restored
 
         if fallback:
-            logger.error("Finalize fallback: returning draft without punctuation")
+            logger.warning("Finalize fallback: applying draft postprocess (lang=%s)", self.config.language)
             return self.finalize_text(fallback)
         return ""
 
@@ -174,7 +187,16 @@ class SenseVoiceEngine:
             text = rich_transcription_postprocess(text)
         except Exception:
             pass
-        return normalize_trailing_punctuation(text)
+        text = normalize_trailing_punctuation(text)
+        if self._should_apply_ja_punctuation():
+            text = apply_japanese_punctuation(text)
+        return text
+
+    def _should_apply_ja_punctuation(self) -> bool:
+        return (
+            self.config.ja_apply_punctuation
+            and self.config.language.lower() in ("ja", "jp", "japanese")
+        )
 
     @staticmethod
     def _resample(audio: np.ndarray, src_sr: int, dst_sr: int) -> np.ndarray:

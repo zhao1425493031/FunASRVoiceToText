@@ -45,6 +45,7 @@ class AppConfig:
     runtime_ssl: bool
     model_hub: str
     session_pcm_max_seconds: int
+    ja_apply_punctuation: bool
 
     @property
     def chunk_stride_samples(self) -> int:
@@ -167,4 +168,5 @@ def load_config(path: Path | None = None) -> AppConfig:
         runtime_ssl=bool(raw.get("runtime_ssl", False)),
         model_hub=str(raw.get("model_hub", "ms")),
         session_pcm_max_seconds=int(raw.get("session_pcm_max_seconds", 600)),
+        ja_apply_punctuation=bool(raw.get("ja_apply_punctuation", True)),
     )
