@@ -93,6 +93,13 @@
     partialText.textContent = "—";
   }
 
+  /** One block per recording session (stop/end), not per silence-finalize. */
+  function setSessionFinal(text) {
+    if (!text || !text.trim()) return;
+    finalList.innerHTML = "";
+    addFinalLine(text);
+  }
+
   function handleServerMessage(raw) {
     let msg;
     try {
@@ -103,7 +110,7 @@
     if (msg.type === "partial" && msg.text) {
       partialText.textContent = msg.text;
     } else if (msg.type === "final" && msg.text) {
-      addFinalLine(msg.text);
+      setSessionFinal(msg.text);
     } else if (msg.type === "error") {
       setState("error");
       statusText.textContent = msg.message || "服务器错误";

@@ -58,7 +58,9 @@ class SenseVoiceEngine:
     def detect_speech(self, audio: np.ndarray) -> bool:
         if audio.size == 0:
             return False
-        return float(np.sqrt(np.mean(audio * audio))) >= 0.01
+        from voicetotext.stream_session import audio_rms
+
+        return audio_rms(audio) >= self.config.vad_energy_threshold
 
     def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
         if audio.size == 0:

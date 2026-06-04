@@ -1,7 +1,7 @@
 host: "0.0.0.0"
 port: 8765
 asr_backend: "sensevoice"
-language: "ja"
+language: "zh"
 asr_model: "iic/SenseVoiceSmall"
 vad_model: "fsmn-vad"
 punc_model: ""
@@ -11,6 +11,10 @@ chunk_size: [0, 10, 5]
 encoder_chunk_look_back: 4
 decoder_chunk_look_back: 1
 vad_silence_ms: 800
+# false = 仅客户端 end/停止 时定稿（AI Chat 一句话按住说）
+auto_finalize_on_silence: false
+vad_energy_threshold: 0.02
+min_partial_chars: 2
 stream_window_ms: 2000
 log_dir: "logs"
 sample_rate: 16000

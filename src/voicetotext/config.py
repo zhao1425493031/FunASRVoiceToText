@@ -27,6 +27,9 @@ class AppConfig:
     encoder_chunk_look_back: int
     decoder_chunk_look_back: int
     vad_silence_ms: int
+    auto_finalize_on_silence: bool
+    vad_energy_threshold: float
+    min_partial_chars: int
     stream_window_ms: int
     log_dir: str
     sample_rate: int
@@ -141,6 +144,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         encoder_chunk_look_back=int(raw.get("encoder_chunk_look_back", 4)),
         decoder_chunk_look_back=int(raw.get("decoder_chunk_look_back", 1)),
         vad_silence_ms=int(raw.get("vad_silence_ms", 800)),
+        auto_finalize_on_silence=bool(raw.get("auto_finalize_on_silence", False)),
+        vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.02)),
+        min_partial_chars=int(raw.get("min_partial_chars", 2)),
         stream_window_ms=int(raw.get("stream_window_ms", 2000)),
         log_dir=str(raw.get("log_dir", "logs")),
         sample_rate=int(raw.get("sample_rate", 16000)),

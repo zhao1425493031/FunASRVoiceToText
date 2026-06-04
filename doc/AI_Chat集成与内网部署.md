@@ -115,7 +115,9 @@ python scripts/run_server.py
 ### 3.6 体验预期
 
 - **首段 partial 延迟**：默认 `stream_window_ms: 2000`，约 **2～5 秒** 才可能有首字；UI 建议显示「正在识别…」
-- **静音判句**：`vad_silence_ms: 800` 可能自动 `final`；有「结束」按钮时以 **`end` 为主**
+- **一条 growing 字幕**：同一轮 `start`～`end` 内，`partial.text` 为 **会话累计草稿**（非每 2 秒覆盖）；点结束后 `final` 为 **整段定稿**
+- **静音/噪声**：整窗能量低于 `vad_energy_threshold`（默认 `0.02`）不推理；纯标点等由 `min_partial_chars` 过滤
+- **静音判句**：默认 `auto_finalize_on_silence: false`，**仅** `end`/停止时发 `final`；停顿不会拆成多条
 - **并发**：多连接共享 **串行推理**（`inference_lock`），用户多时可能排队；`max_ws_connections` 默认 20
 
 ### 3.7 参考实现
@@ -207,7 +209,8 @@ python scripts/run_server.py
 |------|-------------|
 | 手机点话筒无反应 / `getUserMedia` 报错 | Chat 为 **HTTP 内网 IP**；改为 **HTTPS** |
 | WS 连上无字 | 未 `start`、块大小不对、或 `/ready` 仍为 503 |
-| 有连接无 partial | 未满约 2s 窗口；继续说话或调低 `stream_window_ms`（需重启） |
+| 有连接无 partial | 未满约 2s 窗口；或能量低于 `vad_energy_threshold` |
+| partial 闪、只剩 `.` | 已会话累计+过滤标点；可调高 `vad_energy_threshold` |
 | `unauthorized` | 企业 `api_key` 未在 `start` 或 Header 传入 |
 | 改 `language` 无效 | 需 **重启服务**；非另装语言包 |
 | 想中日混说 | 试 `language: auto` 并实测；或分会话/分服务指定 `zh`/`ja` |
@@ -230,3 +233,4 @@ python scripts/run_server.py
 | 日期 | 说明 |
 |------|------|
 | 2026-06-04 | 初版：汇总 AI Chat H5 集成、语言配置、内网 HTTP/HTTPS、独立服务调用 |
+| 2026-06-04 | 流式：会话 draft 累计、能量门控、标点过滤、整段 finalize |

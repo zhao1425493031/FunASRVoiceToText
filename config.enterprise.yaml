@@ -11,6 +11,9 @@ chunk_size: [0, 10, 5]
 encoder_chunk_look_back: 4
 decoder_chunk_look_back: 1
 vad_silence_ms: 800
+auto_finalize_on_silence: false
+vad_energy_threshold: 0.02
+min_partial_chars: 2
 stream_window_ms: 2000
 log_dir: "logs"
 sample_rate: 16000

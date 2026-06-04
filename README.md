@@ -193,6 +193,8 @@ api_key: ""   # 空表示不鉴权
 | `max_ws_connections` | `20` | WebSocket 连接上限 |
 | `device` | `auto` | `auto` / `cpu` / `cuda:0` |
 | `vad_silence_ms` | `800` | 静音判句（毫秒） |
+| `vad_energy_threshold` | `0.02` | 窗级能量门控，低于此不推理 |
+| `min_partial_chars` | `2` | 有效字符过少则不下发 partial |
 | `ssl_certfile` / `ssl_keyfile` | `certs/*.pem` | 手机麦克风必填 |
 
 #### 7.2 企业生产（API Key）
