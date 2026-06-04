@@ -118,6 +118,7 @@ class EmbeddedSenseVoiceEngine:
                 "cache": cache,
                 "language": language,
                 "use_itn": True,
+                "batch_size_s": 300,
             }
 
         kw: dict[str, Any] = {

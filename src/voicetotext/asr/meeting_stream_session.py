@@ -35,10 +35,9 @@ def _synthetic_runtime_msg(
 
 class MeetingStreamSession:
     """
-    Buffers one utterance (speech until silence), runs ASR once at end.
+    Utterance buffer + throttled partial (same seg_id) + final on short silence.
 
-    SenseVoice is not true streaming: partial per chunk caused duplicate/wrong lines.
-    Default: only emit ``final`` after ``vad_silence_ms`` silence.
+    Partial updates one subtitle row; final replaces that row without duplicating.
     """
 
     def __init__(
@@ -59,9 +58,14 @@ class MeetingStreamSession:
         self._utterance_seg_id = new_seg_id()
         self._utterance_start_ms = 0
         self._last_partial_at = 0.0
+        self._last_partial_text = ""
 
     def _elapsed_ms(self) -> int:
         return int((time.time() - self._session_start) * 1000)
+
+    def _utterance_duration_ms(self) -> float:
+        samples = sum(c.size for c in self._utterance_chunks)
+        return samples / self.config.sample_rate * 1000.0
 
     def _append_ring(self, pcm_bytes: bytes) -> None:
         self._pcm_ring.extend(pcm_bytes)
@@ -75,6 +79,24 @@ class MeetingStreamSession:
 
     def _silence_elapsed_ms(self) -> float:
         return (time.time() - self._last_voice_ts) * 1000.0
+
+    def _can_finalize(self) -> bool:
+        """Avoid cutting one sentence on brief pauses (<0.5s) while speaking."""
+        silence = self._silence_elapsed_ms()
+        spoken_ms = self._utterance_duration_ms()
+        if spoken_ms < self.config.meeting_min_utterance_ms:
+            return silence >= self.config.vad_silence_long_ms
+        return silence >= self.config.vad_silence_ms
+
+    def _should_emit_partial_text(self, new_text: str) -> bool:
+        old = self._last_partial_text
+        if not old:
+            return True
+        if new_text == old:
+            return False
+        if new_text.startswith(old):
+            return True
+        return len(new_text) >= len(old)
 
     def _map_text(
         self,
@@ -94,7 +116,11 @@ class MeetingStreamSession:
             t_end_ms=t_end_ms or self._elapsed_ms(),
             is_final=is_final,
         )
-        pcm_window = bytes(self._pcm_ring) if is_final else None
+        pcm_window = (
+            bytes(self._pcm_ring)
+            if is_final and self.config.meeting_use_diarization
+            else None
+        )
         speaker_id, t_start, t_end, speaker_changed = self._assigner.assign(
             runtime_msg, pcm_window=pcm_window
         )
@@ -133,14 +159,18 @@ class MeetingStreamSession:
     def _maybe_emit_partial(self, utterance: np.ndarray) -> list[dict[str, Any]]:
         if not self.config.meeting_emit_partial:
             return []
+        if self._utterance_duration_ms() < self.config.meeting_partial_min_ms:
+            return []
         now = time.time()
-        if now - self._last_partial_at < 1.5:
+        interval_s = self.config.meeting_partial_interval_ms / 1000.0
+        if now - self._last_partial_at < interval_s:
             return []
         self._last_partial_at = now
         cache: dict = {}
         partial = self.engine.transcribe_window(utterance, cache, is_final=False)
-        if not partial:
+        if not partial or not self._should_emit_partial_text(partial):
             return []
+        self._last_partial_text = partial
         return self._map_text(
             partial,
             is_final=False,
@@ -156,6 +186,7 @@ class MeetingStreamSession:
             if not self._utterance_chunks:
                 self._utterance_start_ms = self._elapsed_ms()
                 self._utterance_seg_id = new_seg_id()
+                self._last_partial_text = ""
             self._last_voice_ts = time.time()
             self._utterance_chunks.append(audio)
 
@@ -165,7 +196,7 @@ class MeetingStreamSession:
 
         out.extend(self._maybe_emit_partial(utterance))
 
-        if self._silence_elapsed_ms() >= self.config.vad_silence_ms:
+        if self._can_finalize():
             out.extend(self._finalize_utterance())
 
         return out
@@ -175,7 +206,7 @@ class MeetingStreamSession:
         if utterance.size == 0:
             return []
 
-        text = self.engine.finalize_utterance(utterance, "")
+        text = self.engine.finalize_utterance(utterance, self._last_partial_text)
         if not text:
             self._reset_utterance()
             return []
@@ -194,6 +225,7 @@ class MeetingStreamSession:
         self._utterance_seg_id = new_seg_id()
         self._last_voice_ts = time.time()
         self._last_partial_at = 0.0
+        self._last_partial_text = ""
 
     def finalize_all(self) -> list[dict[str, Any]]:
         return self._finalize_utterance()

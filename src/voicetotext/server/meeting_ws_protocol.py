@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -46,13 +47,15 @@ class MeetingWSSession:
     async def send_pcm(self, data: bytes) -> None:
         if self._stream is None:
             return
-        for mapped in self._stream.feed_pcm(data):
+        messages = await asyncio.to_thread(self._stream.feed_pcm, data)
+        for mapped in messages:
             await self.websocket.send_text(encode_message(mapped))
 
     async def end(self) -> None:
         if self._stream is None:
             return
-        for mapped in self._stream.finalize_all():
+        messages = await asyncio.to_thread(self._stream.finalize_all)
+        for mapped in messages:
             await self.websocket.send_text(encode_message(mapped))
 
     async def close(self) -> None:

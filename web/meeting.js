@@ -156,7 +156,8 @@
     }
     const spk = msg.speaker_id != null ? msg.speaker_id : 0;
     const prefix = `[話者${spk + 1}] `;
-    row.textContent = prefix + (msg.text || "");
+    const draft = msg.type === "partial" ? " …" : "";
+    row.textContent = prefix + (msg.text || "") + draft;
     if (msg.type === "final") {
       row.classList.add("subtitle-final");
       row.classList.remove("subtitle-partial");
@@ -360,7 +361,7 @@
     try {
       await connectWebSocket();
       setState("listening");
-      setHint("話したあと約1秒黙ると、1文の字幕が表示されます。", false);
+      setHint("話している間は1行が更新されます。文の終わりで約1秒止めると確定します。", false);
       startPing();
       await startAudio();
     } catch (err) {

@@ -57,29 +57,51 @@ def _pcm_chunk(config, *, loud: bool = True) -> bytes:
     return (np.full(n, amp, dtype=np.int16)).tobytes()
 
 
-def test_feed_pcm_no_partial_by_default(meeting_config) -> None:
-    engine = MockEngine()
-    session = MeetingStreamSession(engine, meeting_config)
-    msgs = session.feed_pcm(_pcm_chunk(meeting_config))
-    assert not any(m["type"] == "partial" for m in msgs)
-
-
-def test_feed_pcm_emits_partial_when_enabled(meeting_config) -> None:
-    cfg = replace(meeting_config, meeting_emit_partial=True)
+def test_feed_pcm_partial_after_min_duration(meeting_config) -> None:
+    cfg = replace(
+        meeting_config,
+        meeting_emit_partial=True,
+        meeting_partial_min_ms=100,
+        meeting_partial_interval_ms=0,
+    )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
     msgs = session.feed_pcm(_pcm_chunk(cfg))
     assert any(m["type"] == "partial" for m in msgs)
+    partials = [m for m in msgs if m["type"] == "partial"]
+    assert partials[0]["seg_id"] == session._utterance_seg_id
+
+
+def test_feed_pcm_no_partial_when_disabled(meeting_config) -> None:
+    cfg = replace(meeting_config, meeting_emit_partial=False)
+    engine = MockEngine()
+    session = MeetingStreamSession(engine, cfg)
+    msgs = session.feed_pcm(_pcm_chunk(cfg))
+    assert not any(m["type"] == "partial" for m in msgs)
 
 
 def test_silence_emits_final(meeting_config) -> None:
     engine = MockEngine()
-    meeting_config_vad = meeting_config
-    session = MeetingStreamSession(engine, meeting_config_vad)
+    session = MeetingStreamSession(engine, meeting_config)
     session.feed_pcm(_pcm_chunk(meeting_config, loud=True))
-    session._last_voice_ts = time.time() - 2.0
+    session._last_voice_ts = time.time() - 3.0
     msgs = session.feed_pcm(_pcm_chunk(meeting_config, loud=False))
     finals = [m for m in msgs if m["type"] == "final"]
     assert len(finals) == 1
     assert finals[0]["text"] == "final sentence"
-    assert "partial" not in [m["type"] for m in msgs]
+
+
+def test_short_pause_does_not_finalize(meeting_config) -> None:
+    cfg = replace(
+        meeting_config,
+        vad_silence_ms=1100,
+        vad_silence_long_ms=2200,
+        meeting_min_utterance_ms=900,
+        meeting_emit_partial=False,
+    )
+    engine = MockEngine()
+    session = MeetingStreamSession(engine, cfg)
+    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    session._last_voice_ts = time.time() - 0.6
+    msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
+    assert not any(m["type"] == "final" for m in msgs)
