@@ -1,7 +1,7 @@
 host: "0.0.0.0"
 port: 8765
 asr_backend: "sensevoice"
-language: "ja" # zh or ja
+language: "zh" # zh or ja
 asr_model: "iic/SenseVoiceSmall"
 vad_model: "fsmn-vad"
 punc_model: "ct-punc"
