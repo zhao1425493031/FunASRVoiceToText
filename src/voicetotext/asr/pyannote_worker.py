@@ -5,13 +5,16 @@ from __future__ import annotations
 import os
 import threading
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from voicetotext.asr.speaker_timeline import DiarizationSegment
 from voicetotext.config import AppConfig
 from voicetotext.logging_setup import get_logger
+
+if TYPE_CHECKING:
+    from voicetotext.asr.speaker_session import SpeakerSessionContext
 
 logger = get_logger(__name__)
 
@@ -93,12 +96,7 @@ class PyannoteWorker:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
-        self._segments: list[DiarizationSegment] = []
-        ring_sec = max(
-            120,
-            int(config.pyannote_context_sec) + int(config.pyannote_window_sec),
-        )
-        self.ring = AudioRingBuffer(config.sample_rate, max_seconds=ring_sec)
+        self._bound: SpeakerSessionContext | None = None
 
     @property
     def is_loaded(self) -> bool:
@@ -166,23 +164,27 @@ class PyannoteWorker:
             self._thread.join(timeout=5.0)
             self._thread = None
 
-    def reset_session(self) -> None:
-        """Clear per-meeting diarization state (enterprise: new WS session)."""
+    def bind_session(self, ctx: SpeakerSessionContext) -> None:
         with self._lock:
-            self._segments.clear()
-        self.ring.clear()
-        logger.info("Pyannote session reset (ring + segments cleared)")
+            if self._bound is not None and self._bound.session_id != ctx.session_id:
+                logger.warning(
+                    "Pyannote rebind %s -> %s",
+                    self._bound.session_id,
+                    ctx.session_id,
+                )
+            self._bound = ctx
+        logger.info("Pyannote bound to session %s", ctx.session_id)
 
-    def append_pcm(self, pcm_bytes: bytes) -> None:
-        self.ring.append(pcm_bytes)
-
-    def get_segments(self) -> list[DiarizationSegment]:
+    def unbind_session(self, ctx: SpeakerSessionContext) -> None:
         with self._lock:
-            return list(self._segments)
+            if self._bound is ctx:
+                self._bound = None
+        ctx.ring.clear()
+        ctx.pyannote_segments.clear()
+        logger.info("Pyannote unbound from session %s", ctx.session_id)
 
-    def speaker_label_count(self) -> int:
-        with self._lock:
-            return len({s.speaker_label for s in self._segments})
+    def append_pcm(self, ctx: SpeakerSessionContext, pcm_bytes: bytes) -> None:
+        ctx.ring.append(pcm_bytes)
 
     def _run_loop(self) -> None:
         step = self.config.pyannote_step_sec
@@ -192,13 +194,18 @@ class PyannoteWorker:
             time.sleep(step)
             if self._pipeline is None:
                 continue
-            if self.ring.duration_ms < int(min_window * 500):
+            with self._lock:
+                bound = self._bound
+            if bound is None:
+                continue
+            ring = bound.ring
+            if ring.duration_ms < int(min_window * 500):
                 continue
             try:
-                duration_ms = self.ring.duration_ms
+                duration_ms = ring.duration_ms
                 use_sec = min(context, duration_ms / 1000.0)
                 use_sec = max(use_sec, min_window)
-                audio, start_ms = self.ring.snapshot_context(use_sec)
+                audio, start_ms = ring.snapshot_context(use_sec)
                 if audio.size < self.config.sample_rate:
                     continue
                 import torch
@@ -211,24 +218,24 @@ class PyannoteWorker:
                 output = self._pipeline(sample, **self._pipeline_kwargs())
                 new_segs = _parse_pyannote_output(output, start_ms)
                 window_end_ms = start_ms + int(use_sec * 1000)
-                with self._lock:
-                    from voicetotext.asr.speaker_timeline import merge_diarization_windows
+                from voicetotext.asr.speaker_timeline import merge_diarization_windows
 
-                    self._segments = merge_diarization_windows(
-                        self._segments,
-                        new_segs,
-                        start_ms,
-                        window_end_ms,
-                    )
-                    labels = {s.speaker_label for s in self._segments}
-                    logger.info(
-                        "Pyannote context [%.1fs,%d,%d] new=%d total=%d speakers=%d",
-                        use_sec,
-                        start_ms,
-                        window_end_ms,
-                        len(new_segs),
-                        len(self._segments),
-                        len(labels),
-                    )
+                bound.pyannote_segments = merge_diarization_windows(
+                    bound.pyannote_segments,
+                    new_segs,
+                    start_ms,
+                    window_end_ms,
+                )
+                labels = {s.speaker_label for s in bound.pyannote_segments}
+                logger.info(
+                    "Pyannote [%s] context [%.1fs,%d,%d] new=%d total=%d speakers=%d",
+                    bound.session_id,
+                    use_sec,
+                    start_ms,
+                    window_end_ms,
+                    len(new_segs),
+                    len(bound.pyannote_segments),
+                    len(labels),
+                )
             except Exception as exc:
                 logger.warning("Pyannote window failed: %s", exc)

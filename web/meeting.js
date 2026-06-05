@@ -200,7 +200,7 @@
       return `認証失敗: ${text}\nページを再読み込みしてください（?key= は自動付与されます）`;
     }
     if (code === "backend_unavailable") {
-      return `ASR 未就绪: ${text}\nサーバー起動ログで「Embedded ASR model ready」を確認してください`;
+      return `ASR 未就绪: ${text}\nサーバー起動ログで「Meeting server ready」と /ready を確認してください`;
     }
     return `${code}: ${text}`;
   }
@@ -297,8 +297,8 @@
       audio: {
         channelCount: 1,
         echoCancellation: true,
-        noiseSuppression: false,
-        autoGainControl: true,
+        noiseSuppression: true,
+        autoGainControl: false,
       },
       video: false,
     });

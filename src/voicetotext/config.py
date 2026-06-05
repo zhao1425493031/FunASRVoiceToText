@@ -28,6 +28,7 @@ class AppConfig:
     meeting_max_utterance_ms: int
     meeting_use_fsmn_endpoint: bool
     vad_energy_threshold: float
+    vad_speech_onset_chunks: int
     min_partial_chars: int
     log_dir: str
     sample_rate: int
@@ -64,6 +65,8 @@ class AppConfig:
     meeting_use_utterance_embedding: bool
     meeting_spk_embedding_model: str
     meeting_spk_embedding_threshold: float
+    meeting_spk_primary: str
+    meeting_pyannote_min_overlap_ms: int
 
     @property
     def is_meeting_service(self) -> bool:
@@ -179,6 +182,12 @@ def _validate_config(raw: dict[str, Any]) -> None:
     spk_source = str(raw.get("meeting_spk_source", "hybrid")).lower()
     if spk_source not in ("client", "pyannote", "hybrid"):
         raise ValueError("meeting_spk_source must be client, pyannote, or hybrid")
+
+    spk_primary = str(raw.get("meeting_spk_primary", "embedding")).lower()
+    if spk_primary not in ("embedding", "pyannote", "fusion"):
+        raise ValueError(
+            "meeting_spk_primary must be embedding, pyannote, or fusion"
+        )
 
     needs_pyannote = spk_source in ("pyannote", "hybrid")
     if (
@@ -312,7 +321,8 @@ def load_config(path: Path | None = None) -> AppConfig:
         vad_speech_hangover_ms=int(raw.get("vad_speech_hangover_ms", 450)),
         meeting_max_utterance_ms=int(raw.get("meeting_max_utterance_ms", 60000)),
         meeting_use_fsmn_endpoint=bool(raw.get("meeting_use_fsmn_endpoint", True)),
-        vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.005)),
+        vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.012)),
+        vad_speech_onset_chunks=int(raw.get("vad_speech_onset_chunks", 2)),
         min_partial_chars=int(raw.get("min_partial_chars", 1)),
         log_dir=str(raw.get("log_dir", "logs")),
         sample_rate=int(raw.get("sample_rate", 16000)),
@@ -363,5 +373,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         ),
         meeting_spk_embedding_threshold=float(
             raw.get("meeting_spk_embedding_threshold", 0.72)
+        ),
+        meeting_spk_primary=str(raw.get("meeting_spk_primary", "embedding")).lower(),
+        meeting_pyannote_min_overlap_ms=int(
+            raw.get("meeting_pyannote_min_overlap_ms", 200)
         ),
     )

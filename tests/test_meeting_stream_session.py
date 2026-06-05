@@ -10,6 +10,7 @@ import pytest
 from dataclasses import replace
 
 from voicetotext.asr.meeting_stream_session import MeetingStreamSession
+from voicetotext.asr.speaker_session import SpeakerSessionContext
 from voicetotext.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,13 +36,17 @@ class MockEngine:
     def detect_speech(self, audio: np.ndarray) -> bool:
         return float(np.max(np.abs(audio))) > 0.05
 
-    def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
+    def transcribe_window(
+        self, audio: np.ndarray, cache: dict, *, is_final: bool, **kwargs: object
+    ) -> str:
         self._calls += 1
         if is_final:
             return "final sentence"
         return "partial"
 
-    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+    def finalize_utterance(
+        self, audio: np.ndarray, draft_fallback: str, **kwargs: object
+    ) -> str:
         self._finalize_calls += 1
         return self._finalize_text
 
@@ -63,6 +68,15 @@ def _pcm_chunk(config, *, loud: bool = True) -> bytes:
     return (np.full(n, amp, dtype=np.int16)).tobytes()
 
 
+def _feed_speech_onset(session: MeetingStreamSession, cfg, *, loud: bool = True) -> list[dict]:
+    """Feed enough loud chunks to pass vad_speech_onset_chunks noise gate."""
+    need = max(1, cfg.vad_speech_onset_chunks)
+    out: list[dict] = []
+    for _ in range(need):
+        out.extend(session.feed_pcm(_pcm_chunk(cfg, loud=loud)))
+    return out
+
+
 def test_feed_pcm_partial_after_min_duration(meeting_config) -> None:
     cfg = replace(
         meeting_config,
@@ -72,7 +86,7 @@ def test_feed_pcm_partial_after_min_duration(meeting_config) -> None:
     )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
-    msgs = session.feed_pcm(_pcm_chunk(cfg))
+    msgs = _feed_speech_onset(session, cfg)
     partials = [m for m in msgs if m["type"] == "partial"]
     assert partials
     assert partials[0]["protocol_version"] == 2
@@ -82,7 +96,7 @@ def test_feed_pcm_no_partial_when_disabled(meeting_config) -> None:
     cfg = replace(meeting_config, meeting_emit_partial=False)
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
-    msgs = session.feed_pcm(_pcm_chunk(cfg))
+    msgs = _feed_speech_onset(session, cfg)
     assert not any(m["type"] == "partial" for m in msgs)
 
 
@@ -94,7 +108,7 @@ def test_silence_emits_final(meeting_config) -> None:
     )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     session._last_rms_voice_ts = time.time() - 3.0
     msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
     finals = [m for m in msgs if m["type"] == "final"]
@@ -119,7 +133,7 @@ def test_partial_uses_tail_window_only(meeting_config) -> None:
     session._utterance_start_ms = 0
     session._last_partial_at = 0.0
 
-    def _capture(audio, cache, *, is_final=False):
+    def _capture(audio, cache, *, is_final=False, **kwargs: object):
         session._captured_partial_samples = audio.size
         return "partial tail"
 
@@ -140,7 +154,7 @@ def test_short_fragment_defers_until_long_silence(meeting_config) -> None:
     )
     engine = MockEngine(finalize_text="早上好")
     session = MeetingStreamSession(engine, cfg)
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     session._last_rms_voice_ts = time.time() - 2.0
     msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
     assert not any(m["type"] == "final" for m in msgs)
@@ -154,7 +168,12 @@ def test_short_fragment_defers_until_long_silence(meeting_config) -> None:
 
 
 def test_client_speaker_id_on_partial_and_final(meeting_config) -> None:
-    cfg = replace(meeting_config, meeting_spk_source="client", meeting_spk_mode="multi")
+    cfg = replace(
+        meeting_config,
+        meeting_spk_source="client",
+        meeting_spk_mode="multi",
+        min_partial_chars=1,
+    )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg, client_speaker_id=2)
     msgs = session._map_text("你好", is_final=False, t_start_ms=0)
@@ -173,7 +192,7 @@ def test_open_utterance_keeps_buffer_through_trailing_silence(meeting_config) ->
     )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     before = len(session._utterance_chunks)
     session._last_rms_voice_ts = time.time() - 2.0
     session.feed_pcm(_pcm_chunk(cfg, loud=False))
@@ -189,7 +208,7 @@ def test_discardable_fragment_not_emitted(meeting_config) -> None:
     )
     engine = MockEngine(finalize_text="。")
     session = MeetingStreamSession(engine, cfg)
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     session._last_rms_voice_ts = time.time() - 3.0
     msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
     assert not any(m["type"] == "final" for m in msgs)
@@ -200,11 +219,11 @@ class SpeakerChangeMockEngine(MockEngine):
         super().__init__(finalize_text="第一句")
         self._speaker_at: dict[int, int] = {}
 
-    def speaker_at_ms(self, t_ms: int) -> int | None:
+    def speaker_at_ms(self, _ctx: object, t_ms: int) -> int | None:
         return self._speaker_at.get(t_ms)
 
     def resolve_speaker(
-        self, t_start_ms: int, t_end_ms: int, **kwargs: object
+        self, _ctx: object, t_start_ms: int, t_end_ms: int, **kwargs: object
     ) -> tuple[int, bool]:
         start = self._speaker_at.get(t_start_ms, 0)
         end = self._speaker_at.get(t_end_ms, start)
@@ -224,10 +243,11 @@ def test_speaker_change_triggers_early_finalize(meeting_config) -> None:
         meeting_min_utterance_ms=100,
     )
     engine = SpeakerChangeMockEngine()
-    session = MeetingStreamSession(engine, cfg)
+    spk_ctx = SpeakerSessionContext.create(cfg, "spk-change-test")
+    session = MeetingStreamSession(engine, cfg, speaker_ctx=spk_ctx)
     session._utterance_start_ms = 0
     engine._speaker_at[0] = 0
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     session._last_partial_text = "第一句内容"
     session._elapsed_ms = lambda: 2000  # type: ignore[method-assign]
     engine._speaker_at[2000] = 1
@@ -247,7 +267,22 @@ def test_short_pause_does_not_finalize(meeting_config) -> None:
     )
     engine = MockEngine()
     session = MeetingStreamSession(engine, cfg)
-    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    _feed_speech_onset(session, cfg, loud=True)
     session._last_rms_voice_ts = time.time() - 0.6
     msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
     assert not any(m["type"] == "final" for m in msgs)
+
+
+def test_noise_gate_requires_consecutive_loud_chunks(meeting_config) -> None:
+    cfg = replace(
+        meeting_config,
+        vad_energy_threshold=0.01,
+        vad_speech_onset_chunks=2,
+        meeting_emit_partial=False,
+    )
+    engine = MockEngine()
+    session = MeetingStreamSession(engine, cfg)
+    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    assert not session._utterance_chunks
+    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    assert session._utterance_chunks

@@ -48,6 +48,7 @@ class MeetingWSSession:
         self._worker_task: asyncio.Task[None] | None = None
         self._closed = False
         self._participant_id: str | None = None
+        self._speaker_ctx: Any = None
 
     async def start(self, msg: dict[str, Any]) -> None:
         if not self.engine.is_loaded:
@@ -58,13 +59,14 @@ class MeetingWSSession:
             self._session_config = replace(self.config, language=lang)
         else:
             self._session_config = self.config
-        set_lang = getattr(self.engine, "set_session_language", None)
-        if callable(set_lang):
-            set_lang(self._session_config.language)
-
-        begin_spk = getattr(self.engine, "begin_speaker_session", None)
-        if callable(begin_spk):
-            begin_spk()
+        session_id = str(msg.get("session_id", "")).strip() or None
+        open_ctx = getattr(self.engine, "open_speaker_context", None)
+        if callable(open_ctx):
+            self._speaker_ctx = open_ctx(session_id)
+        else:
+            begin_spk = getattr(self.engine, "begin_speaker_session", None)
+            if callable(begin_spk):
+                self._speaker_ctx = begin_spk()
 
         participant_id = str(msg.get("participant_id", "")).strip() or None
         self._participant_id = participant_id
@@ -78,6 +80,7 @@ class MeetingWSSession:
             self._session_config,
             session_start=self._session_start,
             client_speaker_id=client_speaker_id,
+            speaker_ctx=self._speaker_ctx,
         )
         self._closed = False
         self._pcm_queue = asyncio.Queue()
@@ -142,12 +145,14 @@ class MeetingWSSession:
         if callable(release) and self._participant_id:
             release(self._participant_id)
         self._participant_id = None
-        clear_lang = getattr(self.engine, "set_session_language", None)
-        if callable(clear_lang):
-            clear_lang(None)
-        end_spk = getattr(self.engine, "end_speaker_session", None)
-        if callable(end_spk):
-            end_spk()
+        close_ctx = getattr(self.engine, "close_speaker_context", None)
+        if callable(close_ctx) and self._speaker_ctx is not None:
+            close_ctx(self._speaker_ctx)
+        else:
+            end_spk = getattr(self.engine, "end_speaker_session", None)
+            if callable(end_spk):
+                end_spk(self._speaker_ctx)
+        self._speaker_ctx = None
         if self._worker_task is not None:
             await self._pcm_queue.put(None)
             try:

@@ -51,10 +51,12 @@ def _meeting_url_with_key(request: Request | None = None) -> str:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    resolved = getattr(engine, "device", config.device)
     logger.info(
-        "Meeting v3 ASR model=%s device=%s",
+        "Meeting v3 ASR model=%s device=%s (resolved=%s)",
         config.asr_model,
         config.device,
+        resolved,
     )
     engine.load()
     ready = await engine.check_ready()
@@ -105,14 +107,18 @@ if web_root.is_dir():
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
+async def health() -> dict[str, str | int]:
+    resolved = getattr(engine, "device", config.device)
+    active = getattr(engine, "active_session_count", 0)
     return {
         "status": "ok",
-        "device": engine.device,
+        "device": resolved,
+        "device_config": config.device,
         "backend": config.asr_backend,
         "language": config.language,
         "service_mode": config.service_mode,
         "asr_version": "v3",
+        "active_speaker_sessions": active,
     }
 
 

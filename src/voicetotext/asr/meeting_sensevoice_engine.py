@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
+import uuid
 
 import numpy as np
 
@@ -11,7 +12,7 @@ from voicetotext.asr.funasr_vad import FunASRVAD
 from voicetotext.asr.participant_registry import ParticipantSpeakerRegistry
 from voicetotext.asr.pyannote_worker import PyannoteWorker
 from voicetotext.asr.sensevoice_funasr_engine import SenseVoiceFunASREngine
-from voicetotext.asr.speaker_timeline import SpeakerTimelineMerger
+from voicetotext.asr.speaker_session import SpeakerSessionContext
 from voicetotext.asr.utterance_speaker import UtteranceSpeakerEngine
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
@@ -37,9 +38,10 @@ class MeetingSenseVoiceEngine:
         self._embedding: UtteranceSpeakerEngine | None = None
         if self._uses_utterance_embedding():
             self._embedding = UtteranceSpeakerEngine(config, self.device)
-        self._merger = SpeakerTimelineMerger(max_speakers=config.meeting_max_speakers)
         self._participants = ParticipantSpeakerRegistry(config.meeting_max_speakers)
-        self._session_language: str | None = None
+        self._sessions: dict[str, SpeakerSessionContext] = {}
+        self._sessions_lock = threading.Lock()
+        self._active_session_count = 0
         self._inference_lock = threading.Lock()
         self._ready = False
 
@@ -69,20 +71,48 @@ class MeetingSenseVoiceEngine:
             return False
         return self.config.meeting_spk_source in ("client", "hybrid")
 
-    def begin_speaker_session(self) -> None:
-        """Reset diarization state for a new WebSocket meeting session."""
-        self._merger.clear()
+    def open_speaker_context(self, session_id: str | None = None) -> SpeakerSessionContext:
+        """Create isolated speaker state for one WebSocket meeting."""
+        sid = (session_id or "").strip() or str(uuid.uuid4())
+        ctx = SpeakerSessionContext.create(self.config, sid)
+        with self._sessions_lock:
+            self._sessions[sid] = ctx
+            self._active_session_count += 1
         if self.uses_pyannote():
-            self._pyannote.reset_session()
-        if self._embedding is not None:
-            self._embedding.reset_session()
-        logger.info("Speaker session begun (timeline + pyannote + embedding reset)")
+            self._pyannote.bind_session(ctx)
+        logger.info(
+            "Speaker context opened session_id=%s active=%d",
+            sid,
+            self._active_session_count,
+        )
+        return ctx
 
-    def end_speaker_session(self) -> None:
+    def close_speaker_context(self, ctx: SpeakerSessionContext) -> None:
+        with self._sessions_lock:
+            self._sessions.pop(ctx.session_id, None)
+            self._active_session_count = max(0, self._active_session_count - 1)
+            active = self._active_session_count
         if self.uses_pyannote():
-            self._pyannote.reset_session()
-        if self._embedding is not None:
-            self._embedding.reset_session()
+            self._pyannote.unbind_session(ctx)
+        ctx.reset()
+        logger.info(
+            "Speaker context closed session_id=%s active=%d",
+            ctx.session_id,
+            active,
+        )
+
+    def begin_speaker_session(self) -> SpeakerSessionContext:
+        """Backward-compatible alias for open_speaker_context()."""
+        return self.open_speaker_context()
+
+    def end_speaker_session(self, ctx: SpeakerSessionContext | None = None) -> None:
+        if ctx is not None:
+            self.close_speaker_context(ctx)
+
+    @property
+    def active_session_count(self) -> int:
+        with self._sessions_lock:
+            return self._active_session_count
 
     def register_participant(self, participant_id: str | None) -> int | None:
         if not self.uses_client_speaker() or not participant_id:
@@ -130,10 +160,11 @@ class MeetingSenseVoiceEngine:
             self._embedding.load()
         self._ready = True
         logger.info(
-            "MeetingSenseVoiceEngine ready (asr=%s device=%s embedding=%s)",
+            "MeetingSenseVoiceEngine ready (asr=%s device=%s embedding=%s primary=%s)",
             self.config.asr_model,
             self.device,
             self._embedding is not None,
+            self.config.meeting_spk_primary,
         )
 
     def shutdown(self) -> None:
@@ -144,13 +175,17 @@ class MeetingSenseVoiceEngine:
         audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
         return audio / 32768.0
 
-    def append_pcm_for_diarization(self, pcm_bytes: bytes) -> None:
+    def append_pcm_for_diarization(
+        self,
+        ctx: SpeakerSessionContext,
+        pcm_bytes: bytes,
+    ) -> None:
         if self.uses_pyannote():
-            self._pyannote.append_pcm(pcm_bytes)
+            self._pyannote.append_pcm(ctx, pcm_bytes)
 
-    def sync_timeline(self) -> None:
+    def sync_timeline(self, ctx: SpeakerSessionContext) -> None:
         if self.uses_pyannote():
-            self._merger.update_segments(self._pyannote.get_segments())
+            ctx.merger.update_segments(ctx.pyannote_segments)
 
     def detect_speech(self, audio: np.ndarray) -> bool:
         return self._vad.detect_speech_frame(audio)
@@ -160,26 +195,33 @@ class MeetingSenseVoiceEngine:
             return True
         return self._vad.utterance_endpoint_reached(audio)
 
-    def set_session_language(self, language: str | None) -> None:
-        self._session_language = language
-
-    def _active_language(self) -> str:
-        return self._session_language or self.config.language
-
-    def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
-        lang = self._active_language()
+    def transcribe_window(
+        self,
+        audio: np.ndarray,
+        cache: dict,
+        *,
+        is_final: bool,
+        language: str | None = None,
+    ) -> str:
+        lang = language or self.config.language
         with self._inference_lock:
             return self._asr.transcribe(audio, cache, is_final=is_final, language=lang)
 
     def finalize_text(self, text: str) -> str:
         return text.strip()
 
-    def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+    def finalize_utterance(
+        self,
+        audio: np.ndarray,
+        draft_fallback: str,
+        *,
+        language: str | None = None,
+    ) -> str:
         draft = draft_fallback.strip()
         if self._can_reuse_partial_draft(audio, draft):
             return self.finalize_text(draft)
         cache: dict = {}
-        lang = self._active_language()
+        lang = language or self.config.language
         with self._inference_lock:
             text = self._asr.transcribe(audio, cache, is_final=True, language=lang)
         if text:
@@ -191,19 +233,50 @@ class MeetingSenseVoiceEngine:
             logger.warning("Expected sample_rate=%s", self.config.sample_rate)
         return self.finalize_utterance(audio, "")
 
-    def _should_use_embedding(
+    def _pyannote_assignment(
         self,
+        ctx: SpeakerSessionContext,
+        t_start_ms: int,
+        t_end_ms: int,
+    ) -> tuple[int, int, bool]:
+        self.sync_timeline(ctx)
+        merger = ctx.merger
+        single = self.config.meeting_spk_mode != "multi"
+        if single:
+            changed = merger.last_speaker_id != 0
+            merger.force_speaker_id(0)
+            return 0, 0, changed
+
+        label, overlap_ms = merger.best_overlap_label(t_start_ms, t_end_ms)
+        if not label or overlap_ms <= 0:
+            return merger.last_speaker_id, 0, False
+
+        speaker_id = merger._label_to_speaker_id(label)
+        changed = speaker_id != merger.last_speaker_id
+        merger._last_speaker_id = speaker_id
+        logger.info(
+            "assign_speaker [%d,%d] label=%s id=%d overlap_ms=%d (pyannote)",
+            t_start_ms,
+            t_end_ms,
+            label,
+            speaker_id,
+            overlap_ms,
+        )
+        return speaker_id, overlap_ms, changed
+
+    def _embedding_assignment(
+        self,
+        ctx: SpeakerSessionContext,
         audio: np.ndarray | None,
-        pyannote_labels: int,
-    ) -> bool:
+    ) -> int | None:
         if self._embedding is None or audio is None or audio.size == 0:
-            return False
-        if pyannote_labels >= 2:
-            return False
-        return True
+            return None
+        with self._inference_lock:
+            return self._embedding.assign_from_audio(audio, ctx.registry)
 
     def resolve_speaker(
         self,
+        ctx: SpeakerSessionContext,
         t_start_ms: int,
         t_end_ms: int,
         *,
@@ -211,40 +284,70 @@ class MeetingSenseVoiceEngine:
     ) -> tuple[int, bool]:
         if not self.uses_pyannote():
             return 0, False
-        self.sync_timeline()
-        single = self.config.meeting_spk_mode != "multi"
-        pyannote_labels = self._pyannote.speaker_label_count()
-        speaker_id, changed = self._merger.assign_speaker(
-            t_start_ms,
-            t_end_ms,
-            single_speaker_mode=single,
-        )
 
-        if self._should_use_embedding(audio, pyannote_labels):
-            emb_id = self._embedding.assign_from_audio(audio)  # type: ignore[union-attr]
+        merger = ctx.merger
+        primary = self.config.meeting_spk_primary
+        min_overlap = self.config.meeting_pyannote_min_overlap_ms
+        py_id, py_overlap, py_changed = self._pyannote_assignment(ctx, t_start_ms, t_end_ms)
+        py_reliable = py_overlap >= min_overlap
+        emb_id = self._embedding_assignment(ctx, audio)
+
+        if primary == "pyannote":
+            if py_reliable:
+                return py_id, py_changed
             if emb_id is not None:
+                logger.info("Speaker pyannote-unreliable -> embedding id=%d", emb_id)
+                return merger.force_speaker_id(emb_id)
+            return py_id, py_changed
+
+        if primary == "fusion":
+            if emb_id is not None and py_reliable:
+                if emb_id != py_id:
+                    logger.info(
+                        "Speaker fusion: embedding=%d pyannote=%d -> embedding",
+                        emb_id,
+                        py_id,
+                    )
+                return merger.force_speaker_id(emb_id)
+            if emb_id is not None:
+                return merger.force_speaker_id(emb_id)
+            if py_reliable:
+                return py_id, py_changed
+            return merger.last_speaker_id, False
+
+        if emb_id is not None:
+            if py_reliable and emb_id != py_id:
                 logger.info(
-                    "Speaker fallback embedding id=%d (pyannote_labels=%d)",
+                    "Speaker embedding-primary id=%d (pyannote=%d overlap=%dms)",
                     emb_id,
-                    pyannote_labels,
+                    py_id,
+                    py_overlap,
                 )
-                return self._merger.force_speaker_id(emb_id)
+            return merger.force_speaker_id(emb_id)
+        if py_reliable:
+            logger.info("Speaker embedding-miss -> pyannote id=%d", py_id)
+            return py_id, py_changed
+        return merger.last_speaker_id, False
 
-        return speaker_id, changed
-
-    def speaker_at_ms(self, t_ms: int) -> int | None:
-        if not self.uses_pyannote():
-            return None
-        self.sync_timeline()
-        point = self._merger.speaker_at_ms(t_ms)
-        if point is not None:
-            return point
-        if self._embedding is not None and self._embedding.registry.speaker_count > 0:
-            return self._embedding.registry.last_speaker_id
+    def current_speaker_id(self, ctx: SpeakerSessionContext) -> int | None:
+        if ctx.registry.speaker_count > 0:
+            return ctx.registry.last_speaker_id
+        if ctx.merger.last_speaker_id >= 0:
+            return ctx.merger.last_speaker_id
         return None
 
-    def last_speaker_id(self) -> int:
-        return self._merger.last_speaker_id
+    def speaker_at_ms(self, ctx: SpeakerSessionContext, t_ms: int) -> int | None:
+        if not self.uses_pyannote():
+            return None
+        if self.config.meeting_spk_primary in ("embedding", "fusion"):
+            current = self.current_speaker_id(ctx)
+            if current is not None:
+                return current
+        self.sync_timeline(ctx)
+        point = ctx.merger.speaker_at_ms(t_ms)
+        if point is not None:
+            return point
+        return self.current_speaker_id(ctx)
 
     async def check_ready(self) -> bool:
         if not self._ready:
@@ -258,7 +361,7 @@ class MeetingSenseVoiceEngine:
             return False
         return self._vad.is_loaded and self._asr.is_loaded
 
-    def readiness_detail(self) -> dict[str, str | bool]:
+    def readiness_detail(self) -> dict[str, str | bool | int]:
         token_ok = (
             bool(self._pyannote.hf_token()) if self.uses_pyannote() else True
         )
@@ -271,6 +374,8 @@ class MeetingSenseVoiceEngine:
             ),
             "hf_token_present": token_ok,
             "spk_source": self.config.meeting_spk_source,
+            "spk_primary": self.config.meeting_spk_primary,
             "device_resolved": self.device,
+            "active_speaker_sessions": self.active_session_count,
             "engine_ready": self._ready,
         }

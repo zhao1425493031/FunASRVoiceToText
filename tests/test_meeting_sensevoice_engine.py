@@ -49,6 +49,7 @@ def test_readiness_detail_without_token(meeting_config) -> None:
     detail = engine.readiness_detail()
     assert "hf_token_present" in detail
     assert "asr_loaded" in detail
+    assert "active_speaker_sessions" in detail
 
 
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
@@ -60,8 +61,10 @@ def test_resolve_speaker_single_mode(
     cfg = replace(meeting_config, meeting_spk_mode="single")
     engine = MeetingSenseVoiceEngine(cfg)
     engine._ready = True
-    spk, changed = engine.resolve_speaker(0, 1000)
+    ctx = engine.open_speaker_context("test-single")
+    spk, _ = engine.resolve_speaker(ctx, 0, 1000)
     assert spk == 0
+    engine.close_speaker_context(ctx)
 
 
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
@@ -109,13 +112,14 @@ def test_finalize_reruns_asr_when_utterance_longer_than_partial_window(
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_set_session_language_passed_to_asr(
+def test_transcribe_window_passes_language(
     mock_py, mock_asr, mock_vad, meeting_config
 ) -> None:
     engine = MeetingSenseVoiceEngine(meeting_config)
-    engine.set_session_language("zh")
     asr = mock_asr.return_value
-    engine.transcribe_window(np.zeros(1600, dtype=np.float32), {}, is_final=False)
+    engine.transcribe_window(
+        np.zeros(1600, dtype=np.float32), {}, is_final=False, language="zh"
+    )
     asr.transcribe.assert_called_once()
     assert asr.transcribe.call_args.kwargs["language"] == "zh"
 
@@ -124,29 +128,64 @@ def test_set_session_language_passed_to_asr(
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_begin_speaker_session_resets_workers(
+def test_open_speaker_context_binds_pyannote(
     mock_py, mock_asr, mock_vad, mock_emb, meeting_config
 ) -> None:
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine._ready = True
-    engine.begin_speaker_session()
-    mock_py.return_value.reset_session.assert_called_once()
-    mock_emb.return_value.reset_session.assert_called_once()
+    ctx = engine.open_speaker_context("sess-a")
+    mock_py.return_value.bind_session.assert_called_once_with(ctx)
+    engine.close_speaker_context(ctx)
+    mock_py.return_value.unbind_session.assert_called_once_with(ctx)
 
 
 @patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_resolve_speaker_uses_embedding_when_pyannote_single_label(
+def test_resolve_speaker_embedding_primary_even_when_pyannote_has_two_labels(
     mock_py, mock_asr, mock_vad, mock_emb, meeting_config
 ) -> None:
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine._ready = True
-    mock_py.return_value.speaker_label_count.return_value = 1
-    mock_py.return_value.get_segments.return_value = []
+    engine._embedding = mock_emb.return_value
     mock_emb.return_value.assign_from_audio.return_value = 1
+    ctx = engine.open_speaker_context("sess-emb")
+    ctx.merger._label_to_id = {"SPEAKER_00": 0}
     audio = np.zeros(8000, dtype=np.float32)
-    spk, changed = engine.resolve_speaker(0, 1000, audio=audio)
+
+    def fake_overlap(s: int, e: int) -> tuple[str, int]:
+        return "SPEAKER_00", 500
+
+    ctx.merger.best_overlap_label = fake_overlap  # type: ignore[method-assign]
+    spk, _ = engine.resolve_speaker(ctx, 0, 1000, audio=audio)
     assert spk == 1
     mock_emb.return_value.assign_from_audio.assert_called_once()
+    engine.close_speaker_context(ctx)
+
+
+@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
+def test_resolve_speaker_falls_back_to_pyannote_when_embedding_misses(
+    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+) -> None:
+    engine = MeetingSenseVoiceEngine(meeting_config)
+    engine._ready = True
+    engine._embedding = mock_emb.return_value
+    mock_emb.return_value.assign_from_audio.return_value = None
+    ctx = engine.open_speaker_context("sess-fb")
+
+    from voicetotext.asr.speaker_timeline import DiarizationSegment
+
+    ctx.pyannote_segments = [
+        DiarizationSegment(start_ms=0, end_ms=2000, speaker_label="SPEAKER_01"),
+    ]
+    ctx.merger._label_to_id = {"SPEAKER_01": 1}
+    spk, changed = engine.resolve_speaker(
+        ctx, 100, 1500, audio=np.zeros(8000, dtype=np.float32)
+    )
+    assert spk == 1
+    assert changed is True
+    engine.close_speaker_context(ctx)

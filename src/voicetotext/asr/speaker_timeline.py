@@ -117,6 +117,23 @@ class SpeakerTimelineMerger:
                 return self._label_to_speaker_id(seg.speaker_label)
         return None
 
+    def best_overlap_label(
+        self,
+        t_start_ms: int,
+        t_end_ms: int,
+    ) -> tuple[str, int]:
+        """Return (best_speaker_label, overlap_ms). Label empty when no overlap."""
+        if not self.segments:
+            return "", 0
+        best_label = ""
+        best_overlap = 0
+        for seg in self.segments:
+            ov = self._overlap_ms(t_start_ms, t_end_ms, seg.start_ms, seg.end_ms)
+            if ov > best_overlap:
+                best_overlap = ov
+                best_label = seg.speaker_label
+        return best_label, best_overlap
+
     def assign_speaker(
         self,
         t_start_ms: int,
@@ -133,23 +150,7 @@ class SpeakerTimelineMerger:
             self._last_speaker_id = 0
             return 0, changed
 
-        if not self.segments:
-            logger.debug(
-                "assign_speaker: no segments yet [%d,%d] last=%d",
-                t_start_ms,
-                t_end_ms,
-                self._last_speaker_id,
-            )
-            return self._last_speaker_id, False
-
-        best_label = ""
-        best_overlap = -1
-        for seg in self.segments:
-            ov = self._overlap_ms(t_start_ms, t_end_ms, seg.start_ms, seg.end_ms)
-            if ov > best_overlap:
-                best_overlap = ov
-                best_label = seg.speaker_label
-
+        best_label, best_overlap = self.best_overlap_label(t_start_ms, t_end_ms)
         if not best_label or best_overlap <= 0:
             logger.debug(
                 "assign_speaker: no overlap [%d,%d] segs=%d last=%d",

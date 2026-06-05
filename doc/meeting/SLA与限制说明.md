@@ -19,16 +19,18 @@
 2. **speaker_id**：Pyannote 会话内聚类标签，**不**保证跨会话同一人同 ID。
 3. **partial 可被 final 覆盖**：业务入库以 `final` 为准。
 4. **重连**：新 WebSocket = 新会话（不复用 `session_id` 状态）。
-5. **说话人分离（双通道）**：
-   - **主通道**：Pyannote 累积上下文时间轴（`pyannote_context_sec`）与 ASR 时间戳合并。
-   - **回退通道**：当实时 Pyannote 仅检出 1 个标签时，对 **final 句音频** 做 campplus 句级 embedding 聚类（动态人数，阈值 `meeting_spk_embedding_threshold`）。
-   - 滑窗步长导致 Pyannote 标签相对 final 可能有数秒～十余秒延迟；句级回退用于缩短双人对话首句区分时间。
+5. **说话人分离（行业双通道，`meeting_spk_primary`）**：
+   - **主通道（默认 `embedding`）**：每句 **final** 对去静音后的句音频做 campplus 在线聚类（动态人数，阈值 `meeting_spk_embedding_threshold`）。
+   - **辅通道**：Pyannote 累积上下文时间轴（`pyannote_context_sec`）；仅当与句时间重叠 ≥ `meeting_pyannote_min_overlap_ms` 时采信，embedding 失败时作回退。
+   - **融合模式** `fusion`：两路不一致时优先 embedding（实时字幕行业惯例）。
+   - partial 显示沿用当前 embedding 说话人，避免 Pyannote 滞后导致全程话者1。
 6. **device**：`auto` 在无 CUDA 环境回退 CPU；生产 GPU 请显式 `device: cuda` 并安装 CUDA 版 PyTorch。
 7. **会话时长**：默认最长 7200 s，超限 `session_too_long`。
 8. **SenseVoice 流式**：窗级重识别，partial 延迟与抖动可能高于 v2 Qwen 方案。
-9. **新 WebSocket 会话**：服务端重置 Pyannote ring/segments 与 embedding 聚类，避免跨会话污染。
+9. **环境噪声**：默认 `vad_energy_threshold` + 连续 2 块噪声门；浏览器降噪开启。极嘈杂环境仍可能误触，需物理拾音或继续调高阈值。
+10. **新 WebSocket 会话**：服务端重置 Pyannote ring/segments 与 embedding 聚类，避免跨会话污染。
 
 ## 资源
 
-- 建议并发：≤ `max_ws_connections`（默认 8）。
+- 建议并发：默认 `max_ws_connections: 1`（说话人状态按 WS 隔离；多路需 GPU 与独立算力）。
 - v3 单进程加载 SenseVoice + FSMN-VAD + Pyannote；无 Docker Runtime 侧车。

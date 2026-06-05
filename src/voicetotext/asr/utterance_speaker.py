@@ -1,4 +1,4 @@
-"""Per-utterance speaker embedding (FunASR campplus) for real-time fallback."""
+"""Per-utterance speaker embedding (FunASR campplus) — primary real-time diarization."""
 
 from __future__ import annotations
 
@@ -23,6 +23,22 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(_normalize(a), _normalize(b)))
 
 
+def _to_numpy_vector(val: Any) -> np.ndarray | None:
+    if val is None:
+        return None
+    if hasattr(val, "detach"):
+        val = val.detach().cpu().numpy()
+    elif hasattr(val, "cpu"):
+        val = val.cpu().numpy()
+    while isinstance(val, (list, tuple)) and len(val) == 1:
+        val = val[0]
+    try:
+        arr = np.asarray(val, dtype=np.float32).reshape(-1)
+    except (TypeError, ValueError):
+        return None
+    return arr if arr.size > 0 else None
+
+
 def _extract_embedding(result: Any) -> np.ndarray | None:
     if not result:
         return None
@@ -30,18 +46,14 @@ def _extract_embedding(result: Any) -> np.ndarray | None:
         item = result[0]
         if isinstance(item, dict):
             for key in ("spk_embedding", "embedding", "embeddings"):
-                val = item.get(key)
-                if val is not None:
-                    arr = np.asarray(val, dtype=np.float32).reshape(-1)
-                    if arr.size > 0:
-                        return arr
+                emb = _to_numpy_vector(item.get(key))
+                if emb is not None:
+                    return emb
     if isinstance(result, dict):
         for key in ("spk_embedding", "embedding"):
-            val = result.get(key)
-            if val is not None:
-                arr = np.asarray(val, dtype=np.float32).reshape(-1)
-                if arr.size > 0:
-                    return arr
+            emb = _to_numpy_vector(result.get(key))
+            if emb is not None:
+                return emb
     return None
 
 
@@ -86,7 +98,6 @@ class UtteranceSpeakerRegistry:
                 best_idx = i
 
         if best_sim >= self.threshold:
-            # EMA update centroid for drift tolerance
             updated = 0.85 * self._centroids[best_idx] + 0.15 * emb
             self._centroids[best_idx] = updated
             self._last_speaker_id = best_idx
@@ -119,15 +130,11 @@ class UtteranceSpeakerRegistry:
 
 
 class UtteranceSpeakerEngine:
-    """Lazy-loaded FunASR campplus embedding extractor."""
+    """Lazy-loaded FunASR campplus embedding extractor (model shared per process)."""
 
     def __init__(self, config: AppConfig, device: str) -> None:
         self.config = config
         self.device = device
-        self.registry = UtteranceSpeakerRegistry(
-            max_speakers=config.meeting_max_speakers,
-            threshold=config.meeting_spk_embedding_threshold,
-        )
         self._model: Any = None
         self._ready = False
 
@@ -148,22 +155,31 @@ class UtteranceSpeakerEngine:
         )
         self._ready = True
 
-    def reset_session(self) -> None:
-        self.registry.reset()
-
-    def assign_from_audio(self, audio: np.ndarray) -> int | None:
+    def assign_from_audio(
+        self,
+        audio: np.ndarray,
+        registry: UtteranceSpeakerRegistry,
+    ) -> int | None:
         if self._model is None or audio.size == 0:
             return None
         min_samples = int(self.config.sample_rate * 0.3)
         if audio.size < min_samples:
+            logger.debug(
+                "Utterance embedding skipped: audio %.2fs < 0.3s",
+                audio.size / self.config.sample_rate,
+            )
             return None
         try:
             with np.errstate(all="ignore"):
-                res = self._model.generate(input=audio)
+                try:
+                    res = self._model.generate(input=audio, embedding=True)
+                except TypeError:
+                    res = self._model.generate(input=audio)
             emb = _extract_embedding(res)
             if emb is None:
+                logger.warning("Utterance embedding: no vector in model output")
                 return None
-            return self.registry.assign(emb)
+            return registry.assign(emb)
         except Exception as exc:
             logger.warning("Utterance embedding failed: %s", exc)
             return None

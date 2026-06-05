@@ -25,24 +25,25 @@ pyannote_max_speakers: 0
 pyannote_hf_token_env: "HF_TOKEN"
 secrets_file: "secrets.meeting.yaml"
 
-# 句界：两人对话收紧静音阈值，减少 A/B 合成一段
-vad_energy_threshold: 0.005
-vad_speech_hangover_ms: 300
+# 抗环境噪声：提高 RMS 门槛 + 连续块噪声门（见 vad_speech_onset_chunks）
+vad_energy_threshold: 0.02
+vad_speech_onset_chunks: 3
+vad_speech_hangover_ms: 250
 vad_silence_ms: 700
 vad_silence_long_ms: 1200
 meeting_use_fsmn_endpoint: true
 meeting_max_utterance_ms: 30000
-meeting_min_utterance_ms: 400
-meeting_min_finalize_chars: 6
+meeting_min_utterance_ms: 600
+meeting_min_finalize_chars: 10
 
 # 定稿复用 partial 文本草稿，避免句末重复跑 ASR
 meeting_reuse_partial_for_final: true
 meeting_partial_max_sec: 0
 
-min_partial_chars: 1
+min_partial_chars: 4
 meeting_emit_partial: true
 meeting_partial_interval_ms: 1200
-meeting_partial_min_ms: 500
+meeting_partial_min_ms: 800
 
 chunk_size: [0, 10, 5]
 sample_rate: 16000
@@ -51,7 +52,8 @@ log_dir: "logs"
 api_key: "meeting-dev-7k9m2p4x"
 api_key_scopes:
   - meeting
-max_ws_connections: 8
+# 说话人状态按会话隔离；多路并发需 GPU 与独立算力，生产默认单路
+max_ws_connections: 1
 
 meeting_max_speakers: 8
 meeting_session_max_seconds: 7200
@@ -60,10 +62,13 @@ meeting_spk_source: "pyannote"
 meeting_use_diarization: true
 # Pyannote 检测到说话人切换时，提前定稿当前句并开新句
 meeting_spk_change_finalize: true
-# 企业级双通道：Pyannote 时间轴 + campplus 句级 embedding 实时回退（动态人数）
+# 企业级双通道：句级 campplus 为主（实时），Pyannote 长窗为辅（慢路径校正）
 meeting_use_utterance_embedding: true
+meeting_spk_primary: "embedding"
 meeting_spk_embedding_model: "iic/speech_campplus_sv_zh-cn_16k-common"
 meeting_spk_embedding_threshold: 0.72
+# Pyannote 与句时间轴重叠低于此毫秒时不采信（避免全塌缩为话者1）
+meeting_pyannote_min_overlap_ms: 200
 
 ssl_certfile: "certs/cert.pem"
 ssl_keyfile: "certs/key.pem"

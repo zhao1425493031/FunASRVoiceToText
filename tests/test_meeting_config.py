@@ -20,6 +20,7 @@ def test_load_meeting_config() -> None:
     assert cfg.asr_backend == "meeting_sensevoice"
     assert cfg.is_meeting_service is True
     assert cfg.meeting_max_speakers == 8
+    assert cfg.max_ws_connections == 1
     assert cfg.meeting_session_max_seconds == 7200
     assert cfg.device == "auto"
     assert cfg.language in ("ja", "zh")
@@ -27,11 +28,12 @@ def test_load_meeting_config() -> None:
     assert cfg.meeting_reuse_partial_for_final is True
     assert cfg.meeting_partial_max_sec == 0.0
     assert cfg.meeting_use_fsmn_endpoint is True
-    assert cfg.vad_speech_hangover_ms >= 250
-    assert cfg.vad_silence_ms >= 500
-    assert cfg.meeting_spk_change_finalize is True
-    assert cfg.pyannote_step_sec == 2.0
-    assert cfg.meeting_min_finalize_chars >= 6
+    assert cfg.vad_speech_hangover_ms >= 200
+    assert cfg.vad_energy_threshold >= 0.01
+    assert cfg.vad_speech_onset_chunks >= 2
+    assert cfg.meeting_min_finalize_chars >= 10
+    assert cfg.min_partial_chars >= 4
+    assert cfg.meeting_min_utterance_ms >= 600
     assert cfg.asr_model == "iic/SenseVoiceSmall"
     assert cfg.vad_model == "fsmn-vad"
     assert "meeting" in cfg.api_key_scopes
@@ -39,6 +41,8 @@ def test_load_meeting_config() -> None:
     assert cfg.meeting_use_utterance_embedding is True
     assert "campplus" in cfg.meeting_spk_embedding_model
     assert cfg.meeting_spk_embedding_threshold == 0.72
+    assert cfg.meeting_spk_primary == "embedding"
+    assert cfg.meeting_pyannote_min_overlap_ms == 200
 
 
 def test_resolve_device_cuda_fallback_when_unavailable() -> None:
@@ -138,6 +142,19 @@ def test_apply_meeting_secrets_from_file() -> None:
         for p in (secrets, cfg):
             if p.is_file():
                 p.unlink()
+
+
+def test_meeting_spk_primary_must_be_valid() -> None:
+    raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    raw["meeting_spk_primary"] = "invalid"
+    tmp = ROOT / "tests" / "_tmp_meeting_spk_primary.yaml"
+    tmp.write_text(yaml.dump(raw), encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="meeting_spk_primary"):
+            load_config(tmp)
+    finally:
+        if tmp.is_file():
+            tmp.unlink()
 
 
 def test_meeting_spk_source_must_be_valid() -> None:

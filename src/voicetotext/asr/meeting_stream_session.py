@@ -8,10 +8,15 @@ from typing import Any
 
 import numpy as np
 
+from typing import TYPE_CHECKING
+
 from voicetotext.asr.base import ASRBackend
 from voicetotext.server.protocol_common import new_seg_id
 from voicetotext.config import AppConfig
 from voicetotext.logging_setup import get_logger
+
+if TYPE_CHECKING:
+    from voicetotext.asr.speaker_session import SpeakerSessionContext
 
 logger = get_logger(__name__)
 
@@ -31,19 +36,23 @@ class MeetingStreamSession:
         *,
         session_start: float | None = None,
         client_speaker_id: int | None = None,
+        speaker_ctx: SpeakerSessionContext | None = None,
     ) -> None:
         self.engine = engine
         self.config = config
+        self._speaker_ctx = speaker_ctx
         self._client_speaker_id = client_speaker_id
         self._session_start = session_start or time.time()
         self._utterance_chunks: list[np.ndarray] = []
-        self._last_rms_voice_ts = time.time()
+        # 0 = no voice yet; avoids hangover bypassing vad_speech_onset_chunks at session start
+        self._last_rms_voice_ts = 0.0
         self._utterance_seg_id = new_seg_id()
         self._utterance_start_ms = 0
         self._last_partial_at = 0.0
         self._last_partial_text = ""
         self._last_speaker_id = 0
         self._finalize_deferred = False
+        self._speech_onset_streak = 0
 
     def _elapsed_ms(self) -> int:
         return int((time.time() - self._session_start) * 1000)
@@ -58,10 +67,39 @@ class MeetingStreamSession:
     def _in_speech_capture(self) -> bool:
         return self._rms_silence_ms() < self.config.vad_speech_hangover_ms
 
+    def _chunk_has_voice_energy(self, audio: np.ndarray) -> bool:
+        return self.engine.detect_speech(audio)
+
+    def _update_speech_gate(self, audio: np.ndarray) -> bool:
+        """
+        Require consecutive loud chunks before treating input as speech (noise gate).
+        Once speech is open, a single loud chunk refreshes the voice timestamp.
+        """
+        loud = self._chunk_has_voice_energy(audio)
+        need = max(1, self.config.vad_speech_onset_chunks)
+        open_utterance = bool(self._utterance_chunks)
+
+        if loud:
+            self._speech_onset_streak += 1
+        else:
+            self._speech_onset_streak = 0
+
+        if open_utterance or self._in_speech_capture():
+            if loud:
+                self._last_rms_voice_ts = time.time()
+            return loud or self._in_speech_capture()
+
+        if self._speech_onset_streak >= need:
+            self._last_rms_voice_ts = time.time()
+            return True
+        return False
+
     def _append_diarization_pcm(self, pcm_bytes: bytes) -> None:
+        if self._speaker_ctx is None:
+            return
         fn = getattr(self.engine, "append_pcm_for_diarization", None)
         if callable(fn):
-            fn(pcm_bytes)
+            fn(self._speaker_ctx, pcm_bytes)
 
     def _concat_utterance(self) -> np.ndarray:
         if not self._utterance_chunks:
@@ -171,12 +209,18 @@ class MeetingStreamSession:
             self._last_speaker_id = self._client_speaker_id
             return self._client_speaker_id, changed and is_final
 
-        if self._uses_pyannote_speaker():
+        if self._uses_pyannote_speaker() and self._speaker_ctx is not None:
             end_ms = t_end_ms if t_end_ms is not None else self._elapsed_ms()
             if not is_final:
+                current_fn = getattr(self.engine, "current_speaker_id", None)
+                if callable(current_fn):
+                    current_spk = current_fn(self._speaker_ctx)
+                    if current_spk is not None:
+                        self._last_speaker_id = current_spk
+                        return current_spk, False
                 point_fn = getattr(self.engine, "speaker_at_ms", None)
                 if callable(point_fn):
-                    point_spk = point_fn(end_ms)
+                    point_spk = point_fn(self._speaker_ctx, end_ms)
                     if point_spk is not None:
                         self._last_speaker_id = point_spk
                         return point_spk, False
@@ -185,7 +229,9 @@ class MeetingStreamSession:
                 kwargs: dict[str, Any] = {}
                 if is_final and audio is not None and audio.size > 0:
                     kwargs["audio"] = audio
-                speaker_id, changed = fn(t_start_ms, end_ms, **kwargs)
+                speaker_id, changed = fn(
+                    self._speaker_ctx, t_start_ms, end_ms, **kwargs
+                )
                 self._last_speaker_id = speaker_id
                 return speaker_id, changed if is_final else False
 
@@ -200,11 +246,13 @@ class MeetingStreamSession:
             return False
         if self._utterance_duration_ms() < self.config.meeting_min_utterance_ms:
             return False
+        if self._speaker_ctx is None:
+            return False
         fn = getattr(self.engine, "speaker_at_ms", None)
         if not callable(fn):
             return False
-        start_spk = fn(self._utterance_start_ms)
-        now_spk = fn(self._elapsed_ms())
+        start_spk = fn(self._speaker_ctx, self._utterance_start_ms)
+        now_spk = fn(self._speaker_ctx, self._elapsed_ms())
         if start_spk is None or now_spk is None:
             return False
         return start_spk != now_spk
@@ -222,7 +270,11 @@ class MeetingStreamSession:
             return []
 
         end_ms = t_end_ms or self._elapsed_ms()
-        utterance_audio = self._concat_utterance() if is_final else None
+        utterance_audio: np.ndarray | None = None
+        if is_final:
+            raw = self._concat_utterance()
+            if raw.size > 0:
+                utterance_audio = self._speech_audio_for_asr(raw)
         speaker_id, speaker_changed = self._resolve_speaker(
             t_start_ms,
             end_ms,
@@ -282,7 +334,12 @@ class MeetingStreamSession:
         cache: dict = {}
         speech_audio = self._speech_audio_for_asr(utterance)
         partial_audio = self._asr_audio_window(speech_audio, is_final=False)
-        partial = self.engine.transcribe_window(partial_audio, cache, is_final=False)
+        partial = self.engine.transcribe_window(
+            partial_audio,
+            cache,
+            is_final=False,
+            language=self.config.language,
+        )
         if not partial or not self._should_emit_partial_text(partial):
             return []
         self._last_partial_text = partial
@@ -297,9 +354,7 @@ class MeetingStreamSession:
         audio = self.engine.pcm_bytes_to_float32(pcm_bytes)
         out: list[dict[str, Any]] = []
 
-        speech = self.engine.detect_speech(audio)
-        if speech:
-            self._last_rms_voice_ts = time.time()
+        speech = self._update_speech_gate(audio)
 
         open_utterance = bool(self._utterance_chunks)
         if not open_utterance and (speech or self._in_speech_capture()):
@@ -351,7 +406,11 @@ class MeetingStreamSession:
                 return []
         else:
             speech_audio = self._speech_audio_for_asr(utterance)
-            text = self.engine.finalize_utterance(speech_audio, self._last_partial_text)
+            text = self.engine.finalize_utterance(
+                speech_audio,
+                self._last_partial_text,
+                language=self.config.language,
+            )
             if not text:
                 self._reset_utterance()
                 return []
@@ -378,10 +437,10 @@ class MeetingStreamSession:
     def _reset_utterance(self) -> None:
         self._utterance_chunks.clear()
         self._utterance_seg_id = new_seg_id()
-        self._last_rms_voice_ts = time.time()
         self._last_partial_at = 0.0
         self._last_partial_text = ""
         self._finalize_deferred = False
+        self._speech_onset_streak = 0
 
     def finalize_all(self) -> list[dict[str, Any]]:
         return self._finalize_utterance()

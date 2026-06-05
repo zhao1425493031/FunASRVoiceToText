@@ -28,6 +28,19 @@ def test_speaker_at_ms() -> None:
     assert merger.speaker_at_ms(9999) is None
 
 
+def test_best_overlap_label() -> None:
+    merger = SpeakerTimelineMerger(max_speakers=8)
+    merger.update_segments(
+        [
+            DiarizationSegment(0, 2000, "A"),
+            DiarizationSegment(2000, 5000, "B"),
+        ]
+    )
+    label, overlap = merger.best_overlap_label(500, 1500)
+    assert label == "A"
+    assert overlap == 1000
+
+
 def test_assign_speaker_by_overlap() -> None:
     merger = SpeakerTimelineMerger(max_speakers=8)
     merger.update_segments(
