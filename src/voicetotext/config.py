@@ -161,6 +161,87 @@ def _validate_config(raw: dict[str, Any]) -> None:
                 pass  # ready endpoint will report not ready
 
 
+def _valid_hf_token(token: str) -> bool:
+    t = str(token).strip()
+    if not t.startswith("hf_") or len(t) < 20:
+        return False
+    placeholders = ("你的", "在这里粘贴", "paste your", "placeholder", "hf_xxxx")
+    lower = t.lower()
+    return not any(p in lower for p in placeholders)
+
+
+def apply_meeting_secrets(config_path: Path | None = None) -> bool:
+    """
+    Load HF token from secrets.meeting.yaml into os.environ before server start.
+    Skips if env already set. Returns True if token is available after apply.
+    """
+    path = resolve_config_path(config_path)
+    if not path.is_file():
+        return bool(_valid_hf_token(os.environ.get("HF_TOKEN", "")))
+
+    with path.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    env_name = str(raw.get("pyannote_hf_token_env", "HF_TOKEN"))
+    existing = os.environ.get(env_name, "").strip()
+    if _valid_hf_token(existing):
+        return True
+
+    secrets_rel = str(raw.get("secrets_file", "secrets.meeting.yaml"))
+    secrets_path = PROJECT_ROOT / secrets_rel
+    if not secrets_path.is_file():
+        return False
+
+    with secrets_path.open(encoding="utf-8") as f:
+        secrets = yaml.safe_load(f) or {}
+
+    token = secrets.get("hf_token") or secrets.get("HF_TOKEN")
+    if token is None or not _valid_hf_token(str(token)):
+        return False
+
+    os.environ[env_name] = str(token).strip()
+    return True
+
+
+def require_hf_token_for_meeting(config_path: Path | None = None) -> None:
+    """Raise SystemExit with setup hints if Pyannote needs HF token but none configured."""
+    path = resolve_config_path(config_path)
+    with path.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    if not raw.get("meeting_use_diarization", True):
+        return
+    if str(raw.get("meeting_spk_mode", "multi")).lower() != "multi":
+        return
+
+    env_name = str(raw.get("pyannote_hf_token_env", "HF_TOKEN"))
+    if apply_meeting_secrets(path):
+        return
+
+    secrets_rel = str(raw.get("secrets_file", "secrets.meeting.yaml"))
+    secrets_path = PROJECT_ROOT / secrets_rel
+    msg = f"""
+错误：缺少 HuggingFace Token（环境变量 {env_name}）
+
+多人说话人分离需要 Pyannote，请先配置 Token（只需做一次）：
+
+  1. 复制模板：
+     copy secrets.meeting.yaml.example secrets.meeting.yaml
+
+  2. 打开 https://huggingface.co/pyannote/speaker-diarization-community-1 点击同意许可
+
+  3. 在 https://huggingface.co/settings/tokens 创建 Read 类型 Token
+
+  4. 编辑 {secrets_path.name} ，将 hf_token 改为你的真实 Token（形如 hf_xxxxxxxx...）
+
+  5. 再运行：python scripts/run_meeting.py
+
+若暂不需要多人分离，可在 config.meeting.yaml 设置：
+  meeting_spk_mode: single
+"""
+    raise SystemExit(msg.strip())
+
+
 def resolve_config_path(path: Path | None = None) -> Path:
     if path is not None:
         return path

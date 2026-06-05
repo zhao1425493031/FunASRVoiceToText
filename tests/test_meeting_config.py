@@ -74,6 +74,31 @@ def test_meeting_rejects_campplus_config() -> None:
             tmp.unlink()
 
 
+def test_apply_meeting_secrets_from_file() -> None:
+    import os
+
+    from voicetotext.config import apply_meeting_secrets
+
+    secrets = ROOT / "tests" / "_tmp_secrets.yaml"
+    secrets.write_text('hf_token: "hf_from_file_test_token_ok"\n', encoding="utf-8")
+    cfg = ROOT / "tests" / "_tmp_cfg_secrets.yaml"
+    raw = __import__("yaml").safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    raw["secrets_file"] = "tests/_tmp_secrets.yaml"
+    cfg.write_text(__import__("yaml").dump(raw), encoding="utf-8")
+    old = os.environ.pop("HF_TOKEN", None)
+    try:
+        assert apply_meeting_secrets(cfg) is True
+        assert os.environ.get("HF_TOKEN") == "hf_from_file_test_token_ok"
+    finally:
+        if old:
+            os.environ["HF_TOKEN"] = old
+        else:
+            os.environ.pop("HF_TOKEN", None)
+        for p in (secrets, cfg):
+            if p.is_file():
+                p.unlink()
+
+
 def test_language_must_be_ja_or_zh() -> None:
     raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
     raw["language"] = "auto"

@@ -12,9 +12,12 @@ MEETING_CONFIG = ROOT / "config.meeting.yaml"
 sys.path.insert(0, str(ROOT / "src"))
 os.environ["VOICETOTEXT_CONFIG"] = str(MEETING_CONFIG.resolve())
 
+from voicetotext.config import load_config, require_hf_token_for_meeting
+
+require_hf_token_for_meeting(MEETING_CONFIG)
+
 import uvicorn
 
-from voicetotext.config import load_config
 from voicetotext.server import meeting_app as meeting_app_module
 
 

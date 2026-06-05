@@ -10,9 +10,11 @@
 cd C:\python\workspace\python_voicetotext
 pip install -r requirements-meeting.txt
 pip install -e .
+# 若 Qwen3 报错 No module named 'qwen_asr'：pip install qwen-asr
 
-# Pyannote 需要 HuggingFace Token（先在 HF 接受模型许可）
-$env:HF_TOKEN = "hf_xxxxxxxx"
+# 一次性配置 HF Token（无需每次设环境变量）
+copy secrets.meeting.yaml.example secrets.meeting.yaml
+# 编辑 secrets.meeting.yaml，填入 hf_token
 
 python scripts/run_meeting.py
 ```

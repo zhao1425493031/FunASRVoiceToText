@@ -110,10 +110,22 @@ class PyannoteWorker:
         from pyannote.audio import Pipeline
 
         logger.info("Loading Pyannote model=%s", self.config.pyannote_model)
-        self._pipeline = Pipeline.from_pretrained(
-            self.config.pyannote_model,
-            token=token,
-        )
+        try:
+            self._pipeline = Pipeline.from_pretrained(
+                self.config.pyannote_model,
+                token=token,
+            )
+        except Exception as exc:
+            err = str(exc).lower()
+            if "gated" in err or "403" in err or "authorized list" in err:
+                raise RuntimeError(
+                    "Pyannote 模型未授权（403）：Token 已有，但当前 HF 账号尚未同意模型许可。\n"
+                    "请用【创建 Token 的同一账号】登录并打开：\n"
+                    "  https://huggingface.co/pyannote/speaker-diarization-community-1\n"
+                    "在页面点击 Agree / Accept user conditions（有时需先验证邮箱）。\n"
+                    "同意后再运行 python scripts/run_meeting.py"
+                ) from exc
+            raise
         device = self.config.device
         if device.startswith("cuda"):
             import torch
