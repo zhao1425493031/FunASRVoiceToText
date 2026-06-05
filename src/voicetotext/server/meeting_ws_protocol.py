@@ -30,7 +30,7 @@ SUPPORTED_LANGUAGES = frozenset({"ja", "zh"})
 
 
 class MeetingWSSession:
-    """In-process meeting_qwen streaming session."""
+    """In-process meeting_sensevoice streaming session."""
 
     def __init__(
         self,
@@ -152,7 +152,7 @@ class MeetingWSSession:
 
 
 class MeetingWSProtocolHandler:
-    """Meeting v2 handler (meeting_qwen in-process ASR)."""
+    """Meeting v3 handler (meeting_sensevoice in-process ASR)."""
 
     def __init__(
         self,

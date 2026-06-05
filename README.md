@@ -1,7 +1,7 @@
-# python_voicetotext — 多人会议实时字幕 v2
+# python_voicetotext — 多人会议实时字幕 v3
 
 单麦、多人会议实时字幕（协议 v2：`speaker_id` + `seg_id`）。  
-**栈**：FSMN-VAD + Qwen3-ASR（0.6B partial / 1.7B final）+ Pyannote Community-1。  
+**栈**：FSMN-VAD + SenseVoiceSmall + Pyannote Community-1。  
 配置：[`config.meeting.yaml`](config.meeting.yaml)，文档：[`doc/meeting/`](doc/meeting/)。
 
 ## 快速启动
@@ -10,7 +10,6 @@
 cd C:\python\workspace\python_voicetotext
 pip install -r requirements-meeting.txt
 pip install -e .
-# 若 Qwen3 报错 No module named 'qwen_asr'：pip install qwen-asr
 
 # 一次性配置 HF Token（无需每次设环境变量）
 copy secrets.meeting.yaml.example secrets.meeting.yaml
@@ -19,7 +18,7 @@ copy secrets.meeting.yaml.example secrets.meeting.yaml
 python scripts/run_meeting.py
 ```
 
-等待日志 **MeetingQwenEngine ready**（首次会下载模型，需联网）。
+等待日志 **MeetingSenseVoiceEngine ready**（首次会下载模型，需联网）。
 
 手机/PC：`https://<局域网IP>:8766/meeting?key=meeting-dev-7k9m2p4x`
 
@@ -50,6 +49,6 @@ pytest tests/ -q
 
 ## 文档
 
-- [v2方案与背景](doc/meeting/v2方案与背景.md)
+- [v3方案与背景](doc/meeting/v3方案与背景.md)
 - [架构与数据流](doc/meeting/架构与数据流.md)
-- [v2验收清单](doc/meeting/v2验收清单.md)
+- [v3验收清单](doc/meeting/v3验收清单.md)

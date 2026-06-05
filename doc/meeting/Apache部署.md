@@ -1,4 +1,6 @@
-# Apache 反代会议服务（v2）
+# Apache 反代会议服务（v3）
+
+后端：`asr_backend: meeting_sensevoice`，监听 8766。
 
 ## 拓扑
 

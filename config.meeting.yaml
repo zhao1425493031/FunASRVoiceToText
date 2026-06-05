@@ -1,18 +1,16 @@
-# 会议实时字幕 v2 — 企业生产配置（单麦多人 + FSMN 句界）
+# 会议实时字幕 v3 — 企业生产配置（单麦多人 + FSMN 句界 + SenseVoice + Pyannote）
 # 启动: python scripts/run_meeting.py
 
 host: "0.0.0.0"
 port: 8766
 service_mode: "meeting"
-asr_backend: "meeting_qwen"
+asr_backend: "meeting_sensevoice"
 
 device: "cpu"
 language: "zh"
 
+asr_model: "iic/SenseVoiceSmall"
 vad_model: "fsmn-vad"
-qwen_partial_model: "Qwen/Qwen3-ASR-0.6B"
-qwen_final_model: "Qwen/Qwen3-ASR-1.7B"
-funasr_hub: "hf"
 trust_remote_code: true
 
 pyannote_model: "pyannote/speaker-diarization-community-1"
@@ -31,7 +29,7 @@ meeting_max_utterance_ms: 60000
 meeting_min_utterance_ms: 400
 meeting_min_finalize_chars: 6
 
-# CPU：定稿复用 partial，避免双模型内存溢出；GPU 生产改 false
+# 定稿复用 partial 文本草稿，避免句末重复跑 ASR
 meeting_reuse_partial_for_final: true
 meeting_partial_max_sec: 0
 

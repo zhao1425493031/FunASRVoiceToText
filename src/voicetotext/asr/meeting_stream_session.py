@@ -223,7 +223,7 @@ class MeetingStreamSession:
                 "text": text,
                 "t_start_ms": t_start_ms,
                 "t_end_ms": end_ms if is_final else None,
-                "mode": getattr(self.engine, "backend_name", "meeting_qwen"),
+                "mode": getattr(self.engine, "backend_name", "meeting_sensevoice"),
                 "is_final": is_final,
             }
         )

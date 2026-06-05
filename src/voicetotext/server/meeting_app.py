@@ -1,4 +1,4 @@
-"""FastAPI application for meeting-only service (v2: meeting_qwen)."""
+"""FastAPI application for meeting-only service (v3: meeting_sensevoice)."""
 
 from __future__ import annotations
 
@@ -52,9 +52,8 @@ def _meeting_url_with_key(request: Request | None = None) -> str:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info(
-        "Meeting v2 ASR partial=%s final=%s device=%s",
-        config.qwen_partial_model,
-        config.qwen_final_model,
+        "Meeting v3 ASR model=%s device=%s",
+        config.asr_model,
         config.device,
     )
     engine.load()
@@ -69,7 +68,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Meeting server shutdown")
 
 
-app = FastAPI(title="VoiceToText-Meeting-v2", lifespan=lifespan)
+app = FastAPI(title="VoiceToText-Meeting-v3", lifespan=lifespan)
 web_root = config.web_root
 
 
@@ -113,7 +112,7 @@ async def health() -> dict[str, str]:
         "backend": config.asr_backend,
         "language": config.language,
         "service_mode": config.service_mode,
-        "asr_version": "v2",
+        "asr_version": "v3",
     }
 
 

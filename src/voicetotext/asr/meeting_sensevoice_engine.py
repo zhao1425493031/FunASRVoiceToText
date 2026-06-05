@@ -1,4 +1,4 @@
-"""Meeting v2 ASR backend: FSMN-VAD + Qwen3 partial/final + Pyannote."""
+"""Meeting v3 ASR backend: FSMN-VAD + SenseVoice + Pyannote."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import numpy as np
 from voicetotext.asr.funasr_vad import FunASRVAD
 from voicetotext.asr.participant_registry import ParticipantSpeakerRegistry
 from voicetotext.asr.pyannote_worker import PyannoteWorker
-from voicetotext.asr.qwen_funasr_engine import QwenFunASREngine
+from voicetotext.asr.sensevoice_funasr_engine import SenseVoiceFunASREngine
 from voicetotext.asr.speaker_timeline import SpeakerTimelineMerger
 from voicetotext.config import AppConfig, resolve_device
 from voicetotext.logging_setup import get_logger
@@ -18,15 +18,14 @@ from voicetotext.logging_setup import get_logger
 logger = get_logger(__name__)
 
 
-class MeetingQwenEngine:
-    backend_name = "meeting_qwen"
+class MeetingSenseVoiceEngine:
+    backend_name = "meeting_sensevoice"
 
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.device = resolve_device(config.device)
         self._vad = FunASRVAD(config)
-        self._partial = QwenFunASREngine(config, model_id=config.qwen_partial_model)
-        self._final = QwenFunASREngine(config, model_id=config.qwen_final_model)
+        self._asr = SenseVoiceFunASREngine(config)
         self._pyannote = PyannoteWorker(config)
         self._merger = SpeakerTimelineMerger(max_speakers=config.meeting_max_speakers)
         self._participants = ParticipantSpeakerRegistry(config.meeting_max_speakers)
@@ -69,7 +68,7 @@ class MeetingQwenEngine:
             cores = os.cpu_count() or 4
             threads = max(2, min(4, cores // 2))
             torch.set_num_threads(threads)
-            logger.info("MeetingQwenEngine CPU threads=%s", threads)
+            logger.info("MeetingSenseVoiceEngine CPU threads=%s", threads)
         except ImportError:
             pass
 
@@ -89,26 +88,15 @@ class MeetingQwenEngine:
     def load(self) -> None:
         self._tune_cpu_threads()
         self._vad.load()
-        self._partial.load()
-        if self._reuse_partial_for_final():
-            self._final = self._partial
-            logger.info(
-                "MeetingQwenEngine CPU-fast: reusing partial model for final (%s)",
-                self.config.qwen_partial_model,
-            )
-        else:
-            self._final.load()
+        self._asr.load()
         if self.uses_pyannote():
             self._pyannote.load()
             self._pyannote.start()
         self._ready = True
-        final_model = (
-            self.config.qwen_partial_model
-            if self._reuse_partial_for_final()
-            else self.config.qwen_final_model
+        logger.info(
+            "MeetingSenseVoiceEngine ready (asr=%s)",
+            self.config.asr_model,
         )
-        logger.info("MeetingQwenEngine ready (partial=%s final=%s)",
-                    self.config.qwen_partial_model, final_model)
 
     def shutdown(self) -> None:
         if self.uses_pyannote():
@@ -143,9 +131,7 @@ class MeetingQwenEngine:
     def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
         lang = self._active_language()
         with self._inference_lock:
-            if is_final:
-                return self._final.transcribe(audio, cache, is_final=True, language=lang)
-            return self._partial.transcribe(audio, cache, is_final=False, language=lang)
+            return self._asr.transcribe(audio, cache, is_final=is_final, language=lang)
 
     def finalize_text(self, text: str) -> str:
         return text.strip()
@@ -157,7 +143,7 @@ class MeetingQwenEngine:
         cache: dict = {}
         lang = self._active_language()
         with self._inference_lock:
-            text = self._final.transcribe(audio, cache, is_final=True, language=lang)
+            text = self._asr.transcribe(audio, cache, is_final=True, language=lang)
         if text:
             return self.finalize_text(text)
         return self.finalize_text(draft)
@@ -165,7 +151,6 @@ class MeetingQwenEngine:
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         if sample_rate != self.config.sample_rate:
             logger.warning("Expected sample_rate=%s", self.config.sample_rate)
-        cache: dict = {}
         return self.finalize_utterance(audio, "")
 
     def resolve_speaker(
@@ -194,11 +179,7 @@ class MeetingQwenEngine:
                 return False
             if not self._pyannote.is_loaded:
                 return False
-        return (
-            self._vad.is_loaded
-            and self._partial.is_loaded
-            and self._final.is_loaded
-        )
+        return self._vad.is_loaded and self._asr.is_loaded
 
     def readiness_detail(self) -> dict[str, str | bool]:
         token_ok = (
@@ -206,8 +187,7 @@ class MeetingQwenEngine:
         )
         return {
             "vad_loaded": self._vad.is_loaded,
-            "partial_loaded": self._partial.is_loaded,
-            "final_loaded": self._final.is_loaded,
+            "asr_loaded": self._asr.is_loaded,
             "pyannote_loaded": self._pyannote.is_loaded if self.uses_pyannote() else None,
             "hf_token_present": token_ok,
             "spk_source": self.config.meeting_spk_source,

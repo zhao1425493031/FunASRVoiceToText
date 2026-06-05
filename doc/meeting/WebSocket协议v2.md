@@ -12,18 +12,17 @@
 sequenceDiagram
   participant C as Client
   participant G as Gateway
-  participant R as Runtime2pass
+  participant E as MeetingSenseVoiceEngine
 
   C->>G: connect
   C->>G: start v2 meeting
-  G->>R: 2pass handshake
   loop every 600ms
     C->>G: PCM 19200 bytes
-    G->>R: PCM
-    R->>G: 2pass-online
+    G->>E: feed_pcm + diarization
+    E->>G: partial text + speaker_id
     G->>C: partial + speaker_id
   end
-  R->>G: 2pass-offline
+  E->>G: final text + speaker_id
   G->>C: final + speaker_id
   loop every 30s
     C->>G: ping
@@ -31,6 +30,8 @@ sequenceDiagram
   end
   C->>G: end
 ```
+
+后端 v3：`MeetingSenseVoiceEngine`（FSMN-VAD + SenseVoice + Pyannote），进程内推理，无独立 Runtime 容器。
 
 ## 客户端 → 服务端
 

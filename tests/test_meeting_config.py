@@ -1,4 +1,4 @@
-"""Meeting v2 configuration loading and validation."""
+"""Meeting v3 configuration loading and validation."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def test_load_meeting_config() -> None:
     cfg = load_config(ROOT / "config.meeting.yaml")
     assert cfg.service_mode == "meeting"
     assert cfg.port == 8766
-    assert cfg.asr_backend == "meeting_qwen"
+    assert cfg.asr_backend == "meeting_sensevoice"
     assert cfg.is_meeting_service is True
     assert cfg.meeting_max_speakers == 8
     assert cfg.meeting_session_max_seconds == 7200
@@ -30,8 +30,7 @@ def test_load_meeting_config() -> None:
     assert cfg.vad_speech_hangover_ms >= 400
     assert cfg.vad_silence_ms >= 800
     assert cfg.meeting_min_finalize_chars >= 6
-    assert cfg.qwen_partial_model == "Qwen/Qwen3-ASR-0.6B"
-    assert cfg.qwen_final_model == "Qwen/Qwen3-ASR-1.7B"
+    assert cfg.asr_model == "iic/SenseVoiceSmall"
     assert cfg.vad_model == "fsmn-vad"
     assert "meeting" in cfg.api_key_scopes
 
@@ -48,20 +47,46 @@ def test_meeting_rejects_embedded_backend() -> None:
     tmp = ROOT / "tests" / "_tmp_meeting_bad.yaml"
     tmp.write_text(yaml.dump(raw), encoding="utf-8")
     try:
-        with pytest.raises(ValueError, match="meeting_qwen"):
+        with pytest.raises(ValueError, match="meeting_sensevoice"):
             load_config(tmp)
     finally:
         if tmp.is_file():
             tmp.unlink()
 
 
-def test_meeting_rejects_sensevoice_model_key() -> None:
+def test_meeting_rejects_qwen_backend() -> None:
     raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
-    raw["asr_model"] = "iic/SenseVoiceSmall"
-    tmp = ROOT / "tests" / "_tmp_meeting_sv.yaml"
+    raw["asr_backend"] = "meeting_qwen"
+    tmp = ROOT / "tests" / "_tmp_meeting_qwen.yaml"
     tmp.write_text(yaml.dump(raw), encoding="utf-8")
     try:
-        with pytest.raises(ValueError, match="SenseVoice"):
+        with pytest.raises(ValueError, match="meeting_sensevoice"):
+            load_config(tmp)
+    finally:
+        if tmp.is_file():
+            tmp.unlink()
+
+
+def test_meeting_rejects_qwen_model_keys() -> None:
+    raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    raw["qwen_partial_model"] = "Qwen/Qwen3-ASR-0.6B"
+    tmp = ROOT / "tests" / "_tmp_meeting_qwen_key.yaml"
+    tmp.write_text(yaml.dump(raw), encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="qwen_partial_model"):
+            load_config(tmp)
+    finally:
+        if tmp.is_file():
+            tmp.unlink()
+
+
+def test_meeting_rejects_missing_asr_model() -> None:
+    raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    del raw["asr_model"]
+    tmp = ROOT / "tests" / "_tmp_meeting_no_asr.yaml"
+    tmp.write_text(yaml.dump(raw), encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="asr_model"):
             load_config(tmp)
     finally:
         if tmp.is_file():
@@ -82,16 +107,14 @@ def test_meeting_rejects_campplus_config() -> None:
 
 
 def test_apply_meeting_secrets_from_file() -> None:
-    import os
-
     from voicetotext.config import apply_meeting_secrets
 
     secrets = ROOT / "tests" / "_tmp_secrets.yaml"
     secrets.write_text('hf_token: "hf_from_file_test_token_ok"\n', encoding="utf-8")
     cfg = ROOT / "tests" / "_tmp_cfg_secrets.yaml"
-    raw = __import__("yaml").safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
     raw["secrets_file"] = "tests/_tmp_secrets.yaml"
-    cfg.write_text(__import__("yaml").dump(raw), encoding="utf-8")
+    cfg.write_text(yaml.dump(raw), encoding="utf-8")
     old = os.environ.pop("HF_TOKEN", None)
     try:
         assert apply_meeting_secrets(cfg) is True

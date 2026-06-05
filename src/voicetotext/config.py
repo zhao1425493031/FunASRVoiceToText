@@ -52,9 +52,7 @@ class AppConfig:
     meeting_partial_max_sec: float
     vad_silence_long_ms: int
     vad_model: str
-    qwen_partial_model: str
-    qwen_final_model: str
-    funasr_hub: str
+    asr_model: str
     pyannote_model: str
     pyannote_window_sec: float
     pyannote_step_sec: float
@@ -140,18 +138,19 @@ def _validate_config(raw: dict[str, Any]) -> None:
     if service_mode != "meeting":
         raise ValueError("This project only supports service_mode=meeting")
 
-    asr_backend = str(raw.get("asr_backend", "meeting_qwen")).lower()
-    if asr_backend != "meeting_qwen":
-        raise ValueError("Meeting v2 requires asr_backend=meeting_qwen")
+    asr_backend = str(raw.get("asr_backend", "meeting_sensevoice")).lower()
+    if asr_backend != "meeting_sensevoice":
+        raise ValueError("Meeting v3 requires asr_backend=meeting_sensevoice")
 
-    for forbidden in ("sensevoice", "campplus"):
-        blob = str(raw).lower()
-        if forbidden in blob and any(
-            k in raw for k in ("asr_model", "meeting_spk_model") if raw.get(k)
-        ):
-            pass
-    if raw.get("asr_model") and "sensevoice" in str(raw.get("asr_model", "")).lower():
-        raise ValueError("Meeting v2 does not support SenseVoice; use qwen_*_model")
+    for forbidden_key in ("qwen_partial_model", "qwen_final_model", "funasr_hub"):
+        if raw.get(forbidden_key):
+            raise ValueError(
+                f"Meeting v3 removed {forbidden_key}; use asr_model for SenseVoice"
+            )
+
+    if not raw.get("asr_model"):
+        raise ValueError("Meeting v3 requires asr_model (e.g. iic/SenseVoiceSmall)")
+
     if raw.get("meeting_spk_model"):
         raise ValueError("meeting_spk_model (cam++) removed in v2; use pyannote_*")
 
@@ -285,7 +284,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     return AppConfig(
         host=str(raw.get("host", "0.0.0.0")),
         port=port,
-        asr_backend=str(raw.get("asr_backend", "meeting_qwen")),
+        asr_backend=str(raw.get("asr_backend", "meeting_sensevoice")),
         language=str(raw.get("language", "ja")),
         device=str(raw.get("device", "auto")),
         chunk_size=_coerce_int_list(raw.get("chunk_size", [0, 10, 5]), "chunk_size"),
@@ -322,9 +321,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_partial_max_sec=float(raw.get("meeting_partial_max_sec", 0)),
         vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 1600)),
         vad_model=str(raw.get("vad_model", "fsmn-vad")),
-        qwen_partial_model=str(raw.get("qwen_partial_model", "Qwen/Qwen3-ASR-0.6B")),
-        qwen_final_model=str(raw.get("qwen_final_model", "Qwen/Qwen3-ASR-1.7B")),
-        funasr_hub=str(raw.get("funasr_hub", "hf")),
+        asr_model=str(raw.get("asr_model", "iic/SenseVoiceSmall")),
         pyannote_model=str(
             raw.get("pyannote_model", "pyannote/speaker-diarization-community-1")
         ),
