@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>录音转写 · 离线批处理</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/batch.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>录音文件转写</h1>
+    <p class="subtitle">选择音频 → 自动识别 → 复制结果（日文/说话人/时间戳）</p>
+  </header>
+
+  <section class="batch-panel">
+    <label class="file-label">
+      <input type="file" id="audioFile" accept="audio/*,.wav,.mp3,.m4a,.flac,.ogg" hidden />
+      <span class="btn btn-primary" id="pickBtn">选择音频文件</span>
+      <span class="file-name" id="fileName">未选择文件</span>
+    </label>
+    <button type="button" class="btn btn-accent" id="startBtn" disabled>开始转写</button>
+  </section>
+
+  <section class="progress-section" id="progressSection" hidden>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <p class="progress-text" id="progressText">准备中…</p>
+  </section>
+
+  <section class="result-section" id="resultSection" hidden>
+    <div class="result-toolbar">
+      <span id="resultMeta"></span>
+      <button type="button" class="btn btn-small" id="copyBtn">复制全文</button>
+    </div>
+    <textarea id="resultText" readonly rows="16" placeholder="转写结果将显示在这里…"></textarea>
+    <p class="copy-hint" id="copyHint" hidden>已复制到剪贴板</p>
+  </section>
+
+  <p class="error-text" id="errorText" hidden></p>
+
+  <script src="/static/batch.js"></script>
+</body>
+</html>
