@@ -89,11 +89,8 @@ class QwenFunASREngine:
                 "batch_size_s": 300,
             }
             kw.update(self._language_kw(language))
-            if not is_final:
-                kw["chunk_size"] = self.config.chunk_size
-                kw["encoder_chunk_look_back"] = self.config.encoder_chunk_look_back
-                kw["decoder_chunk_look_back"] = self.config.decoder_chunk_look_back
-            else:
+            # Qwen3-ASR is not Paraformer streaming; skip chunk_size kwargs for speed.
+            if is_final:
                 kw["is_final"] = True
             res = self._model.generate(**kw)
             return _extract_text(res)

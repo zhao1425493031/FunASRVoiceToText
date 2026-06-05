@@ -67,7 +67,11 @@ def test_finalize_reuses_partial_when_configured(
 ) -> None:
     from dataclasses import replace
 
-    cfg = replace(meeting_config, meeting_reuse_partial_for_final=True)
+    cfg = replace(
+        meeting_config,
+        meeting_reuse_partial_for_final=True,
+        meeting_partial_max_sec=4.0,
+    )
     engine = MeetingQwenEngine(cfg)
     import numpy as np
 
@@ -77,6 +81,30 @@ def test_finalize_reuses_partial_when_configured(
     )
     assert out == "draft from partial"
     mock_qwen.return_value.transcribe.assert_not_called()
+
+
+@patch("voicetotext.asr.meeting_qwen_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_qwen_engine.QwenFunASREngine")
+@patch("voicetotext.asr.meeting_qwen_engine.PyannoteWorker")
+def test_finalize_reruns_asr_when_utterance_longer_than_partial_window(
+    mock_py, mock_qwen, mock_vad, meeting_config
+) -> None:
+    from dataclasses import replace
+
+    cfg = replace(
+        meeting_config,
+        meeting_reuse_partial_for_final=True,
+        meeting_partial_max_sec=4.0,
+        sample_rate=16000,
+    )
+    engine = MeetingQwenEngine(cfg)
+    mock_qwen.return_value.transcribe.return_value = "full sentence"
+    audio = np.zeros(int(16000 * 8), dtype=np.float32)
+
+    out = engine.finalize_utterance(audio, "tail only draft")
+
+    assert out == "full sentence"
+    mock_qwen.return_value.transcribe.assert_called_once()
 
 
 @patch("voicetotext.asr.meeting_qwen_engine.FunASRVAD")

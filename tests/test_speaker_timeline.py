@@ -5,6 +5,7 @@ from __future__ import annotations
 from voicetotext.asr.speaker_timeline import (
     DiarizationSegment,
     SpeakerTimelineMerger,
+    merge_diarization_windows,
     parse_runtime_timestamps,
 )
 
@@ -45,6 +46,19 @@ def test_no_segments_returns_last() -> None:
     spk, changed = merger.assign_speaker(0, 1000)
     assert spk == 2
     assert changed is False
+
+
+def test_merge_diarization_windows_replaces_overlap() -> None:
+    existing = [
+        DiarizationSegment(0, 5000, "A"),
+        DiarizationSegment(5000, 10000, "B"),
+    ]
+    incoming = [DiarizationSegment(8000, 12000, "C")]
+    merged = merge_diarization_windows(existing, incoming, 8000, 12000)
+    labels = [(s.start_ms, s.speaker_label) for s in merged]
+    assert (0, "A") in labels
+    assert (8000, "C") in labels
+    assert not any(s.start_ms == 5000 and s.speaker_label == "B" for s in merged)
 
 
 def test_max_speakers_cap() -> None:

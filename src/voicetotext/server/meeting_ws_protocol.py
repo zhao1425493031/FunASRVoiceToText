@@ -47,6 +47,7 @@ class MeetingWSSession:
         self._pcm_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self._worker_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._participant_id: str | None = None
 
     async def start(self, msg: dict[str, Any]) -> None:
         if not self.engine.is_loaded:
@@ -60,15 +61,30 @@ class MeetingWSSession:
         set_lang = getattr(self.engine, "set_session_language", None)
         if callable(set_lang):
             set_lang(self._session_config.language)
+
+        participant_id = str(msg.get("participant_id", "")).strip() or None
+        self._participant_id = participant_id
+        client_speaker_id: int | None = None
+        register = getattr(self.engine, "register_participant", None)
+        if callable(register) and participant_id:
+            client_speaker_id = register(participant_id)
+
         self._stream = MeetingStreamSession(
             self.engine,
             self._session_config,
             session_start=self._session_start,
+            client_speaker_id=client_speaker_id,
         )
         self._closed = False
         self._pcm_queue = asyncio.Queue()
         self._worker_task = asyncio.create_task(self._pcm_worker())
-        logger.info("Meeting session started (v2 lang=%s)", self._session_config.language)
+        logger.info(
+            "Meeting session started (v2 lang=%s spk_source=%s participant=%s speaker_id=%s)",
+            self._session_config.language,
+            self._session_config.meeting_spk_source,
+            participant_id or "-",
+            client_speaker_id if client_speaker_id is not None else "-",
+        )
 
     async def _send_messages(self, messages: list[dict[str, Any]]) -> bool:
         for mapped in messages:
@@ -118,6 +134,10 @@ class MeetingWSSession:
 
     async def close(self) -> None:
         self._closed = True
+        release = getattr(self.engine, "release_participant", None)
+        if callable(release) and self._participant_id:
+            release(self._participant_id)
+        self._participant_id = None
         clear_lang = getattr(self.engine, "set_session_language", None)
         if callable(clear_lang):
             clear_lang(None)

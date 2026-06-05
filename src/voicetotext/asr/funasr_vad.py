@@ -69,8 +69,7 @@ class FunASRVAD:
         if self._model is None or audio.size == 0:
             return self.detect_speech_frame(audio)
         try:
-            res = self._model.generate(input=audio, batch_size_s=300)
-            segs = _extract_vad_segments(res)
+            segs = self._vad_segments(audio)
             if segs:
                 self._last_has_speech = True
                 return True
@@ -79,3 +78,35 @@ class FunASRVAD:
         except Exception as exc:
             logger.debug("VAD generate failed, fallback RMS: %s", exc)
             return self.detect_speech_frame(audio)
+
+    def _vad_segments(self, audio: np.ndarray) -> list[tuple[int, int]]:
+        if self._model is None or audio.size == 0:
+            return []
+        res = self._model.generate(input=audio, batch_size_s=300)
+        return _extract_vad_segments(res)
+
+    def utterance_endpoint_reached(
+        self,
+        audio: np.ndarray,
+        *,
+        tail_margin_ms: int = 320,
+    ) -> bool:
+        """
+        True when FSMN-VAD shows speech ended before the utterance tail.
+        Industry endpoint gate: avoid cutting on brief RMS dips mid-sentence.
+        """
+        if audio.size == 0:
+            return True
+        duration_ms = int(audio.size / self.config.sample_rate * 1000)
+        if duration_ms < 200:
+            return False
+        try:
+            segs = self._vad_segments(audio)
+        except Exception as exc:
+            logger.debug("FSMN endpoint check failed, fallback silence timer: %s", exc)
+            return True
+        if not segs:
+            # No speech detected — not an endpoint; wait for more audio or silence timer.
+            return False
+        last_end = max(end for _, end in segs)
+        return last_end <= max(0, duration_ms - tail_margin_ms)

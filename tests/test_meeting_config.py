@@ -23,8 +23,13 @@ def test_load_meeting_config() -> None:
     assert cfg.meeting_session_max_seconds == 7200
     assert cfg.device == "cpu"
     assert cfg.language in ("ja", "zh")
+    assert cfg.meeting_spk_source == "pyannote"
     assert cfg.meeting_reuse_partial_for_final is True
-    assert cfg.vad_silence_ms >= 2500
+    assert cfg.meeting_partial_max_sec == 0.0
+    assert cfg.meeting_use_fsmn_endpoint is True
+    assert cfg.vad_speech_hangover_ms >= 400
+    assert cfg.vad_silence_ms >= 800
+    assert cfg.meeting_min_finalize_chars >= 6
     assert cfg.qwen_partial_model == "Qwen/Qwen3-ASR-0.6B"
     assert cfg.qwen_final_model == "Qwen/Qwen3-ASR-1.7B"
     assert cfg.vad_model == "fsmn-vad"
@@ -99,6 +104,19 @@ def test_apply_meeting_secrets_from_file() -> None:
         for p in (secrets, cfg):
             if p.is_file():
                 p.unlink()
+
+
+def test_meeting_spk_source_must_be_valid() -> None:
+    raw = yaml.safe_load((ROOT / "config.meeting.yaml").read_text(encoding="utf-8"))
+    raw["meeting_spk_source"] = "invalid"
+    tmp = ROOT / "tests" / "_tmp_meeting_spk.yaml"
+    tmp.write_text(yaml.dump(raw), encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="meeting_spk_source"):
+            load_config(tmp)
+    finally:
+        if tmp.is_file():
+            tmp.unlink()
 
 
 def test_language_must_be_ja_or_zh() -> None:

@@ -21,6 +21,7 @@ def test_short_text_not_finalized_early() -> None:
         meeting_min_finalize_chars=12,
         meeting_min_utterance_ms=2000,
         meeting_emit_partial=False,
+        vad_silence_long_ms=3000,
     )
     engine = MockEngine()
 
@@ -31,6 +32,6 @@ def test_short_text_not_finalized_early() -> None:
 
     session = MeetingStreamSession(engine, cfg)
     session.feed_pcm(_pcm_chunk(cfg, loud=True))
-    session._last_voice_ts = __import__("time").time() - 3.0
+    session._last_rms_voice_ts = __import__("time").time() - 2.5
     msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
     assert not any(m["type"] == "final" for m in msgs)

@@ -24,6 +24,9 @@ class AppConfig:
     encoder_chunk_look_back: int
     decoder_chunk_look_back: int
     vad_silence_ms: int
+    vad_speech_hangover_ms: int
+    meeting_max_utterance_ms: int
+    meeting_use_fsmn_endpoint: bool
     vad_energy_threshold: float
     min_partial_chars: int
     log_dir: str
@@ -39,12 +42,14 @@ class AppConfig:
     meeting_session_max_seconds: int
     meeting_use_diarization: bool
     meeting_spk_mode: str
+    meeting_spk_source: str
     meeting_min_finalize_chars: int
     meeting_emit_partial: bool
     meeting_partial_interval_ms: int
     meeting_partial_min_ms: int
     meeting_min_utterance_ms: int
     meeting_reuse_partial_for_final: bool
+    meeting_partial_max_sec: float
     vad_silence_long_ms: int
     vad_model: str
     qwen_partial_model: str
@@ -154,12 +159,20 @@ def _validate_config(raw: dict[str, Any]) -> None:
     if lang not in ("ja", "zh"):
         raise ValueError(f"Unsupported language: {lang} (use ja or zh)")
 
-    if raw.get("meeting_use_diarization", True) and raw.get("meeting_spk_mode", "multi") == "multi":
+    spk_source = str(raw.get("meeting_spk_source", "hybrid")).lower()
+    if spk_source not in ("client", "pyannote", "hybrid"):
+        raise ValueError("meeting_spk_source must be client, pyannote, or hybrid")
+
+    needs_pyannote = spk_source in ("pyannote", "hybrid")
+    if (
+        needs_pyannote
+        and raw.get("meeting_use_diarization", True)
+        and raw.get("meeting_spk_mode", "multi") == "multi"
+    ):
         env_name = str(raw.get("pyannote_hf_token_env", "HF_TOKEN"))
         if not os.environ.get(env_name):
-            # Allow missing token at load time for tests via VOICETOTEXT_SKIP_HF_CHECK=1
             if os.environ.get("VOICETOTEXT_SKIP_HF_CHECK") != "1":
-                pass  # ready endpoint will report not ready
+                pass
 
 
 def _valid_hf_token(token: str) -> bool:
@@ -210,6 +223,9 @@ def require_hf_token_for_meeting(config_path: Path | None = None) -> None:
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
 
+    spk_source = str(raw.get("meeting_spk_source", "hybrid")).lower()
+    if spk_source not in ("pyannote", "hybrid"):
+        return
     if not raw.get("meeting_use_diarization", True):
         return
     if str(raw.get("meeting_spk_mode", "multi")).lower() != "multi":
@@ -271,12 +287,15 @@ def load_config(path: Path | None = None) -> AppConfig:
         port=port,
         asr_backend=str(raw.get("asr_backend", "meeting_qwen")),
         language=str(raw.get("language", "ja")),
-        device=str(raw.get("device", "cpu")),
+        device=str(raw.get("device", "auto")),
         chunk_size=_coerce_int_list(raw.get("chunk_size", [0, 10, 5]), "chunk_size"),
         encoder_chunk_look_back=int(raw.get("encoder_chunk_look_back", 4)),
         decoder_chunk_look_back=int(raw.get("decoder_chunk_look_back", 1)),
-        vad_silence_ms=int(raw.get("vad_silence_ms", 1500)),
-        vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.008)),
+        vad_silence_ms=int(raw.get("vad_silence_ms", 1000)),
+        vad_speech_hangover_ms=int(raw.get("vad_speech_hangover_ms", 450)),
+        meeting_max_utterance_ms=int(raw.get("meeting_max_utterance_ms", 60000)),
+        meeting_use_fsmn_endpoint=bool(raw.get("meeting_use_fsmn_endpoint", True)),
+        vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.005)),
         min_partial_chars=int(raw.get("min_partial_chars", 1)),
         log_dir=str(raw.get("log_dir", "logs")),
         sample_rate=int(raw.get("sample_rate", 16000)),
@@ -291,18 +310,17 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_session_max_seconds=int(raw.get("meeting_session_max_seconds", 7200)),
         meeting_use_diarization=bool(raw.get("meeting_use_diarization", True)),
         meeting_spk_mode=str(raw.get("meeting_spk_mode", "multi")).lower(),
-        meeting_min_finalize_chars=int(raw.get("meeting_min_finalize_chars", 15)),
+        meeting_spk_source=str(raw.get("meeting_spk_source", "hybrid")).lower(),
+        meeting_min_finalize_chars=int(raw.get("meeting_min_finalize_chars", 2)),
         meeting_emit_partial=bool(raw.get("meeting_emit_partial", True)),
-        meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 2000)),
-        meeting_partial_min_ms=int(raw.get("meeting_partial_min_ms", 800)),
-        meeting_min_utterance_ms=int(raw.get("meeting_min_utterance_ms", 1600)),
+        meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 1200)),
+        meeting_partial_min_ms=int(raw.get("meeting_partial_min_ms", 500)),
+        meeting_min_utterance_ms=int(raw.get("meeting_min_utterance_ms", 400)),
         meeting_reuse_partial_for_final=bool(
-            raw.get(
-                "meeting_reuse_partial_for_final",
-                str(raw.get("device", "cpu")).lower() == "cpu",
-            )
+            raw.get("meeting_reuse_partial_for_final", False)
         ),
-        vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 2600)),
+        meeting_partial_max_sec=float(raw.get("meeting_partial_max_sec", 0)),
+        vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 1600)),
         vad_model=str(raw.get("vad_model", "fsmn-vad")),
         qwen_partial_model=str(raw.get("qwen_partial_model", "Qwen/Qwen3-ASR-0.6B")),
         qwen_final_model=str(raw.get("qwen_final_model", "Qwen/Qwen3-ASR-1.7B")),
@@ -311,6 +329,6 @@ def load_config(path: Path | None = None) -> AppConfig:
             raw.get("pyannote_model", "pyannote/speaker-diarization-community-1")
         ),
         pyannote_window_sec=float(raw.get("pyannote_window_sec", 10)),
-        pyannote_step_sec=float(raw.get("pyannote_step_sec", 5)),
+        pyannote_step_sec=float(raw.get("pyannote_step_sec", 4)),
         pyannote_hf_token_env=str(raw.get("pyannote_hf_token_env", "HF_TOKEN")),
     )

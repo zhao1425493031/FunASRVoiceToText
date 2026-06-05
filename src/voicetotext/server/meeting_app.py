@@ -86,10 +86,12 @@ async def meeting_page(request: Request) -> HTMLResponse | RedirectResponse:
     html = html_path.read_text(encoding="utf-8")
     key_js = (config.api_key or "").replace("\\", "\\\\").replace('"', '\\"')
     spk_mode = config.meeting_spk_mode.replace("\\", "\\\\").replace('"', '\\"')
+    spk_source = config.meeting_spk_source.replace("\\", "\\\\").replace('"', '\\"')
     lang = config.language.replace("\\", "\\\\").replace('"', '\\"')
     inject = (
         f'<script>window.__MEETING_API_KEY__="{key_js}";'
         f'window.__MEETING_SPK_MODE__="{spk_mode}";'
+        f'window.__MEETING_SPK_SOURCE__="{spk_source}";'
         f'window.__MEETING_LANGUAGE__="{lang}";</script>'
     )
     if "</head>" in html:
@@ -121,7 +123,11 @@ async def ready() -> JSONResponse:
     detail = getattr(engine, "readiness_detail", lambda: {})()
     if not ok:
         reason = "ASR stack not ready"
-        if config.meeting_use_diarization and config.meeting_spk_mode == "multi":
+        if (
+            config.meeting_spk_source in ("pyannote", "hybrid")
+            and config.meeting_use_diarization
+            and config.meeting_spk_mode == "multi"
+        ):
             token_env = config.pyannote_hf_token_env
             if not os.environ.get(token_env):
                 reason = f"Missing {token_env} for Pyannote Community-1"

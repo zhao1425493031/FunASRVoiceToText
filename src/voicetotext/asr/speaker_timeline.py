@@ -24,6 +24,34 @@ class DiarizationSegment:
     speaker_label: str
 
 
+def merge_diarization_windows(
+    existing: list[DiarizationSegment],
+    incoming: list[DiarizationSegment],
+    window_start_ms: int,
+    window_end_ms: int,
+    *,
+    max_history_ms: int = 3_600_000,
+) -> list[DiarizationSegment]:
+    """
+    Merge a new Pyannote sliding-window result into the session timeline.
+
+    Segments overlapping [window_start, window_end] are replaced by ``incoming``;
+    segments outside the window are retained (enterprise cumulative diarization).
+    """
+    if window_end_ms < window_start_ms:
+        window_end_ms = window_start_ms
+    kept = [
+        seg
+        for seg in existing
+        if seg.end_ms <= window_start_ms or seg.start_ms >= window_end_ms
+    ]
+    merged = sorted(kept + list(incoming), key=lambda s: s.start_ms)
+    if not merged or max_history_ms <= 0:
+        return merged
+    cutoff = merged[-1].end_ms - max_history_ms
+    return [seg for seg in merged if seg.end_ms >= cutoff]
+
+
 @dataclass
 class SpeakerTimelineMerger:
     """Map ASR [t_start, t_end] to stable integer speaker_id."""
@@ -40,6 +68,19 @@ class SpeakerTimelineMerger:
 
     def update_segments(self, segments: list[DiarizationSegment]) -> None:
         self.segments = sorted(segments, key=lambda s: s.start_ms)
+
+    def merge_window(
+        self,
+        incoming: list[DiarizationSegment],
+        window_start_ms: int,
+        window_end_ms: int,
+    ) -> None:
+        self.segments = merge_diarization_windows(
+            self.segments,
+            incoming,
+            window_start_ms,
+            window_end_ms,
+        )
 
     def _label_to_speaker_id(self, label: str) -> int:
         if label in self._label_to_id:

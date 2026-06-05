@@ -25,6 +25,23 @@
   let pingTimer = null;
   let sessionReadyTimeoutId = null;
   const linesBySegId = new Map();
+  const PARTICIPANT_STORAGE_KEY = "voicetotext_meeting_participant_id";
+
+  function ensureParticipantId() {
+    try {
+      let id = sessionStorage.getItem(PARTICIPANT_STORAGE_KEY);
+      if (!id) {
+        id =
+          typeof crypto !== "undefined" && crypto.randomUUID
+            ? crypto.randomUUID()
+            : `participant-${Date.now()}`;
+        sessionStorage.setItem(PARTICIPANT_STORAGE_KEY, id);
+      }
+      return id;
+    } catch (_) {
+      return `participant-${Date.now()}`;
+    }
+  }
 
   function apiKeyFromQuery() {
     return new URLSearchParams(location.search).get("key") || "";
@@ -277,7 +294,12 @@
 
   async function startAudio() {
     mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
       video: false,
     });
     audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -331,6 +353,9 @@
           itn: true,
           session_id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
         };
+        if ((window.__MEETING_SPK_SOURCE__ || "pyannote") !== "pyannote") {
+          startMsg.participant_id = ensureParticipantId();
+        }
         if (key) startMsg.api_key = key;
         ws.send(JSON.stringify(startMsg));
       };
@@ -371,8 +396,8 @@
       setState("listening");
       setHint(
         isSingleSpeakerMode()
-          ? "話したあと約3秒止めると1行確定します（単一話者）。"
-          : "話している間は1行が更新されます。文の終わりで約3秒止めると確定します。",
+          ? "話したあと約2秒止めると1行確定します（単一話者）。"
+          : "1台のマイクで複数話者を認識します。話している間は同じ行が更新され、FSMN が句末と判断したときに確定します。",
         false
       );
       startPing();
@@ -385,7 +410,10 @@
   function updateKeyHint() {
     if (resolvedApiKey()) {
       const spkNote = isSingleSpeakerMode() ? "（単一話者）" : "";
-      setHint(`「字幕開始」を押すと「字幕認識中…」のままマイクが有効になります。${spkNote}`, false);
+      setHint(
+        `「字幕開始」でマイクが有効になります。会議室では拾音端末1台を会場中央に置いてください。${spkNote}`,
+        false
+      );
     } else {
       setHint("API Key 未設定。サーバー設定を確認してください。", true);
     }

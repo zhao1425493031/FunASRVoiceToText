@@ -175,7 +175,15 @@ class PyannoteWorker:
                 }
                 output = self._pipeline(sample)
                 new_segs = _parse_pyannote_output(output, start_ms)
+                window_end_ms = start_ms + int(window * 1000)
                 with self._lock:
-                    self._segments = new_segs
+                    from voicetotext.asr.speaker_timeline import merge_diarization_windows
+
+                    self._segments = merge_diarization_windows(
+                        self._segments,
+                        new_segs,
+                        start_ms,
+                        window_end_ms,
+                    )
             except Exception as exc:
                 logger.warning("Pyannote window failed: %s", exc)

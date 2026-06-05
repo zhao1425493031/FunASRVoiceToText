@@ -23,6 +23,30 @@ def test_detect_speech_frame_rms() -> None:
 
 
 @patch("funasr.AutoModel")
+def test_utterance_endpoint_no_segments(mock_auto_model) -> None:
+    cfg = load_config(ROOT / "config.meeting.yaml")
+    mock_model = MagicMock()
+    mock_model.generate.return_value = [{"value": []}]
+    mock_auto_model.return_value = mock_model
+    vad = FunASRVAD(cfg)
+    vad.load()
+    audio = np.full(16000, 0.3, dtype=np.float32)
+    assert not vad.utterance_endpoint_reached(audio, tail_margin_ms=320)
+
+
+@patch("funasr.AutoModel")
+def test_utterance_endpoint_reached(mock_auto_model) -> None:
+    cfg = load_config(ROOT / "config.meeting.yaml")
+    mock_model = MagicMock()
+    mock_model.generate.return_value = [{"value": [[0, 600]]}]
+    mock_auto_model.return_value = mock_model
+    vad = FunASRVAD(cfg)
+    vad.load()
+    audio = np.full(16000, 0.3, dtype=np.float32)
+    assert vad.utterance_endpoint_reached(audio, tail_margin_ms=320)
+
+
+@patch("funasr.AutoModel")
 def test_vad_load(mock_auto_model) -> None:
     cfg = load_config(ROOT / "config.meeting.yaml")
     mock_auto_model.return_value = MagicMock()
