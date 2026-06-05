@@ -161,6 +161,7 @@ class MeetingStreamSession:
         t_end_ms: int | None = None,
         *,
         is_final: bool,
+        audio: np.ndarray | None = None,
     ) -> tuple[int, bool]:
         if self.config.meeting_spk_mode != "multi":
             return 0, False
@@ -171,14 +172,42 @@ class MeetingStreamSession:
             return self._client_speaker_id, changed and is_final
 
         if self._uses_pyannote_speaker():
+            end_ms = t_end_ms if t_end_ms is not None else self._elapsed_ms()
+            if not is_final:
+                point_fn = getattr(self.engine, "speaker_at_ms", None)
+                if callable(point_fn):
+                    point_spk = point_fn(end_ms)
+                    if point_spk is not None:
+                        self._last_speaker_id = point_spk
+                        return point_spk, False
             fn = getattr(self.engine, "resolve_speaker", None)
             if callable(fn):
-                end_ms = t_end_ms if t_end_ms is not None else self._elapsed_ms()
-                speaker_id, changed = fn(t_start_ms, end_ms)
+                kwargs: dict[str, Any] = {}
+                if is_final and audio is not None and audio.size > 0:
+                    kwargs["audio"] = audio
+                speaker_id, changed = fn(t_start_ms, end_ms, **kwargs)
                 self._last_speaker_id = speaker_id
                 return speaker_id, changed if is_final else False
 
         return self._last_speaker_id, False
+
+    def _should_finalize_on_speaker_change(self) -> bool:
+        if not self.config.meeting_spk_change_finalize:
+            return False
+        if not self._uses_pyannote_speaker():
+            return False
+        if not self._utterance_chunks:
+            return False
+        if self._utterance_duration_ms() < self.config.meeting_min_utterance_ms:
+            return False
+        fn = getattr(self.engine, "speaker_at_ms", None)
+        if not callable(fn):
+            return False
+        start_spk = fn(self._utterance_start_ms)
+        now_spk = fn(self._elapsed_ms())
+        if start_spk is None or now_spk is None:
+            return False
+        return start_spk != now_spk
 
     def _map_text(
         self,
@@ -193,8 +222,12 @@ class MeetingStreamSession:
             return []
 
         end_ms = t_end_ms or self._elapsed_ms()
+        utterance_audio = self._concat_utterance() if is_final else None
         speaker_id, speaker_changed = self._resolve_speaker(
-            t_start_ms, end_ms, is_final=is_final
+            t_start_ms,
+            end_ms,
+            is_final=is_final,
+            audio=utterance_audio,
         )
 
         out: list[dict[str, Any]] = []
@@ -228,9 +261,10 @@ class MeetingStreamSession:
             }
         )
         logger.info(
-            "Meeting subtitle %s seg=%s chars=%d",
+            "Meeting subtitle %s seg=%s spk=%d chars=%d",
             msg_type,
             self._utterance_seg_id,
+            speaker_id,
             len(text),
         )
         return out
@@ -281,6 +315,22 @@ class MeetingStreamSession:
         utterance = self._concat_utterance()
         if utterance.size == 0:
             return out
+
+        if self._should_finalize_on_speaker_change():
+            partial_text = self._last_partial_text.strip()
+            if len(partial_text) >= self.config.meeting_min_finalize_chars:
+                logger.info(
+                    "Speaker change boundary at %dms (seg=%s)",
+                    self._elapsed_ms(),
+                    self._utterance_seg_id,
+                )
+                out.extend(self._finalize_utterance())
+                self._utterance_start_ms = self._elapsed_ms()
+                self._utterance_seg_id = new_seg_id()
+                self._last_partial_text = ""
+                self._finalize_deferred = False
+                self._utterance_chunks = [audio]
+                utterance = self._concat_utterance()
 
         out.extend(self._maybe_emit_partial(utterance))
 

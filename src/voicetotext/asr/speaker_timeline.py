@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from voicetotext.logging_setup import get_logger
+
+logger = get_logger(__name__)
+
 
 def parse_runtime_timestamps(msg: dict) -> tuple[int | None, int | None]:
     stamp_sents = msg.get("stamp_sents")
@@ -66,6 +70,16 @@ class SpeakerTimelineMerger:
         self._label_to_id.clear()
         self._last_speaker_id = 0
 
+    @property
+    def last_speaker_id(self) -> int:
+        return self._last_speaker_id
+
+    def force_speaker_id(self, speaker_id: int) -> tuple[int, bool]:
+        """Override last speaker (e.g. utterance embedding fallback)."""
+        changed = speaker_id != self._last_speaker_id
+        self._last_speaker_id = speaker_id
+        return speaker_id, changed
+
     def update_segments(self, segments: list[DiarizationSegment]) -> None:
         self.segments = sorted(segments, key=lambda s: s.start_ms)
 
@@ -96,6 +110,13 @@ class SpeakerTimelineMerger:
         end = min(a_end, b_end)
         return max(0, end - start)
 
+    def speaker_at_ms(self, t_ms: int) -> int | None:
+        """Return speaker_id for the diarization segment covering t_ms."""
+        for seg in self.segments:
+            if seg.start_ms <= t_ms < seg.end_ms:
+                return self._label_to_speaker_id(seg.speaker_label)
+        return None
+
     def assign_speaker(
         self,
         t_start_ms: int,
@@ -113,6 +134,12 @@ class SpeakerTimelineMerger:
             return 0, changed
 
         if not self.segments:
+            logger.debug(
+                "assign_speaker: no segments yet [%d,%d] last=%d",
+                t_start_ms,
+                t_end_ms,
+                self._last_speaker_id,
+            )
             return self._last_speaker_id, False
 
         best_label = ""
@@ -124,9 +151,26 @@ class SpeakerTimelineMerger:
                 best_label = seg.speaker_label
 
         if not best_label or best_overlap <= 0:
+            logger.debug(
+                "assign_speaker: no overlap [%d,%d] segs=%d last=%d",
+                t_start_ms,
+                t_end_ms,
+                len(self.segments),
+                self._last_speaker_id,
+            )
             return self._last_speaker_id, False
 
         speaker_id = self._label_to_speaker_id(best_label)
         changed = speaker_id != self._last_speaker_id
         self._last_speaker_id = speaker_id
+        logger.info(
+            "assign_speaker [%d,%d] label=%s id=%d overlap_ms=%d segs=%d changed=%s",
+            t_start_ms,
+            t_end_ms,
+            best_label,
+            speaker_id,
+            best_overlap,
+            len(self.segments),
+            changed,
+        )
         return speaker_id, changed

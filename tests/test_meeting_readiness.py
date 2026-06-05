@@ -32,6 +32,9 @@ async def test_check_ready_true_when_mocked() -> None:
     engine._asr._model = object()
     engine._pyannote._ready = True
     engine._pyannote._pipeline = object()
+    if engine._embedding is not None:
+        engine._embedding._ready = True
+        engine._embedding._model = object()
     assert await engine.check_ready() is True
     del os.environ["HF_TOKEN"]
 
@@ -48,4 +51,7 @@ async def test_check_ready_false_without_hf_token_multi() -> None:
     engine._asr._model = object()
     engine._pyannote._ready = True
     engine._pyannote._pipeline = object()
+    if engine._embedding is not None:
+        engine._embedding._ready = True
+        engine._embedding._model = object()
     assert await engine.check_ready() is False

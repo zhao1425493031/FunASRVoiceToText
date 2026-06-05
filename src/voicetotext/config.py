@@ -49,14 +49,21 @@ class AppConfig:
     meeting_partial_min_ms: int
     meeting_min_utterance_ms: int
     meeting_reuse_partial_for_final: bool
+    meeting_spk_change_finalize: bool
     meeting_partial_max_sec: float
     vad_silence_long_ms: int
     vad_model: str
     asr_model: str
     pyannote_model: str
     pyannote_window_sec: float
+    pyannote_context_sec: float
     pyannote_step_sec: float
+    pyannote_min_speakers: int
+    pyannote_max_speakers: int
     pyannote_hf_token_env: str
+    meeting_use_utterance_embedding: bool
+    meeting_spk_embedding_model: str
+    meeting_spk_embedding_threshold: float
 
     @property
     def is_meeting_service(self) -> bool:
@@ -99,16 +106,27 @@ class AppConfig:
 
 
 def resolve_device(device: str) -> str:
-    if device != "auto":
-        return device
-    try:
-        import torch
+    """Resolve config device with safe CUDA fallback for enterprise deployment."""
+    raw = str(device).strip().lower()
+    if raw == "auto":
+        try:
+            import torch
 
-        if torch.cuda.is_available():
-            return "cuda:0"
-    except ImportError:
-        pass
-    return "cpu"
+            if torch.cuda.is_available():
+                return "cuda:0"
+        except ImportError:
+            pass
+        return "cpu"
+    if raw.startswith("cuda"):
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                return "cpu"
+        except ImportError:
+            return "cpu"
+        return raw if ":" in raw else "cuda:0"
+    return raw
 
 
 def _coerce_int_list(value: Any, key: str) -> list[int]:
@@ -318,6 +336,9 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_reuse_partial_for_final=bool(
             raw.get("meeting_reuse_partial_for_final", False)
         ),
+        meeting_spk_change_finalize=bool(
+            raw.get("meeting_spk_change_finalize", True)
+        ),
         meeting_partial_max_sec=float(raw.get("meeting_partial_max_sec", 0)),
         vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 1600)),
         vad_model=str(raw.get("vad_model", "fsmn-vad")),
@@ -326,6 +347,21 @@ def load_config(path: Path | None = None) -> AppConfig:
             raw.get("pyannote_model", "pyannote/speaker-diarization-community-1")
         ),
         pyannote_window_sec=float(raw.get("pyannote_window_sec", 10)),
+        pyannote_context_sec=float(raw.get("pyannote_context_sec", 60)),
         pyannote_step_sec=float(raw.get("pyannote_step_sec", 4)),
+        pyannote_min_speakers=int(raw.get("pyannote_min_speakers", 1)),
+        pyannote_max_speakers=int(raw.get("pyannote_max_speakers", 0)),
         pyannote_hf_token_env=str(raw.get("pyannote_hf_token_env", "HF_TOKEN")),
+        meeting_use_utterance_embedding=bool(
+            raw.get("meeting_use_utterance_embedding", True)
+        ),
+        meeting_spk_embedding_model=str(
+            raw.get(
+                "meeting_spk_embedding_model",
+                "iic/speech_campplus_sv_zh-cn_16k-common",
+            )
+        ),
+        meeting_spk_embedding_threshold=float(
+            raw.get("meeting_spk_embedding_threshold", 0.72)
+        ),
     )

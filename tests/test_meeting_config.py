@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from voicetotext.config import load_config, DEFAULT_CONFIG_PATH
+from voicetotext.config import load_config, DEFAULT_CONFIG_PATH, resolve_device
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,18 +21,29 @@ def test_load_meeting_config() -> None:
     assert cfg.is_meeting_service is True
     assert cfg.meeting_max_speakers == 8
     assert cfg.meeting_session_max_seconds == 7200
-    assert cfg.device == "cpu"
+    assert cfg.device == "auto"
     assert cfg.language in ("ja", "zh")
     assert cfg.meeting_spk_source == "pyannote"
     assert cfg.meeting_reuse_partial_for_final is True
     assert cfg.meeting_partial_max_sec == 0.0
     assert cfg.meeting_use_fsmn_endpoint is True
-    assert cfg.vad_speech_hangover_ms >= 400
-    assert cfg.vad_silence_ms >= 800
+    assert cfg.vad_speech_hangover_ms >= 250
+    assert cfg.vad_silence_ms >= 500
+    assert cfg.meeting_spk_change_finalize is True
+    assert cfg.pyannote_step_sec == 2.0
     assert cfg.meeting_min_finalize_chars >= 6
     assert cfg.asr_model == "iic/SenseVoiceSmall"
     assert cfg.vad_model == "fsmn-vad"
     assert "meeting" in cfg.api_key_scopes
+    assert cfg.pyannote_context_sec == 60.0
+    assert cfg.meeting_use_utterance_embedding is True
+    assert "campplus" in cfg.meeting_spk_embedding_model
+    assert cfg.meeting_spk_embedding_threshold == 0.72
+
+
+def test_resolve_device_cuda_fallback_when_unavailable() -> None:
+    assert resolve_device("cuda") == "cpu" or resolve_device("cuda").startswith("cuda")
+    assert resolve_device("auto") in ("cpu", "cuda:0")
 
 
 def test_default_config_is_meeting_yaml() -> None:

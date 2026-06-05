@@ -17,9 +17,18 @@ def test_audio_ring_buffer_snapshot() -> None:
     ring = AudioRingBuffer(16000, max_seconds=30)
     pcm = (np.full(16000, 1000, dtype=np.int16)).tobytes()
     ring.append(pcm)
-    audio, start_ms = ring.snapshot_window(1.0)
+    audio, start_ms = ring.snapshot_context(1.0)
     assert audio.size == 16000
     assert start_ms >= 0
+
+
+def test_audio_ring_buffer_clear_resets() -> None:
+    ring = AudioRingBuffer(16000, max_seconds=30)
+    ring.append((np.full(16000, 1000, dtype=np.int16)).tobytes())
+    ring.clear()
+    audio, start_ms = ring.snapshot_context(1.0)
+    assert audio.size == 0
+    assert start_ms == 0
 
 
 def test_parse_pyannote_output_empty() -> None:
@@ -45,5 +54,6 @@ def test_pyannote_hf_token_env() -> None:
     cfg = load_config(ROOT / "config.meeting.yaml")
     from voicetotext.asr.pyannote_worker import PyannoteWorker
 
-    worker = PyannoteWorker(cfg)
+    worker = PyannoteWorker(cfg, device="cpu")
     assert worker.hf_token() is None or isinstance(worker.hf_token(), str)
+    assert worker._pipeline_kwargs()["min_speakers"] >= 1

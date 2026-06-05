@@ -195,6 +195,48 @@ def test_discardable_fragment_not_emitted(meeting_config) -> None:
     assert not any(m["type"] == "final" for m in msgs)
 
 
+class SpeakerChangeMockEngine(MockEngine):
+    def __init__(self) -> None:
+        super().__init__(finalize_text="第一句")
+        self._speaker_at: dict[int, int] = {}
+
+    def speaker_at_ms(self, t_ms: int) -> int | None:
+        return self._speaker_at.get(t_ms)
+
+    def resolve_speaker(
+        self, t_start_ms: int, t_end_ms: int, **kwargs: object
+    ) -> tuple[int, bool]:
+        start = self._speaker_at.get(t_start_ms, 0)
+        end = self._speaker_at.get(t_end_ms, start)
+        changed = end != getattr(self, "_last", start)
+        self._last = end
+        return end, changed
+
+
+def test_speaker_change_triggers_early_finalize(meeting_config) -> None:
+    cfg = replace(
+        meeting_config,
+        meeting_spk_change_finalize=True,
+        meeting_emit_partial=True,
+        meeting_partial_min_ms=100,
+        meeting_partial_interval_ms=0,
+        meeting_min_finalize_chars=2,
+        meeting_min_utterance_ms=100,
+    )
+    engine = SpeakerChangeMockEngine()
+    session = MeetingStreamSession(engine, cfg)
+    session._utterance_start_ms = 0
+    engine._speaker_at[0] = 0
+    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    session._last_partial_text = "第一句内容"
+    session._elapsed_ms = lambda: 2000  # type: ignore[method-assign]
+    engine._speaker_at[2000] = 1
+    msgs = session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    finals = [m for m in msgs if m["type"] == "final"]
+    assert len(finals) >= 1
+    assert finals[0]["text"] == "第一句"
+
+
 def test_short_pause_does_not_finalize(meeting_config) -> None:
     cfg = replace(
         meeting_config,

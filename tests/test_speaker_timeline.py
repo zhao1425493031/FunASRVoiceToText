@@ -15,6 +15,19 @@ def test_parse_runtime_timestamps() -> None:
     assert parse_runtime_timestamps(msg) == (100, 500)
 
 
+def test_speaker_at_ms() -> None:
+    merger = SpeakerTimelineMerger(max_speakers=8)
+    merger.update_segments(
+        [
+            DiarizationSegment(0, 2000, "A"),
+            DiarizationSegment(2000, 5000, "B"),
+        ]
+    )
+    assert merger.speaker_at_ms(500) == 0
+    assert merger.speaker_at_ms(2500) == 1
+    assert merger.speaker_at_ms(9999) is None
+
+
 def test_assign_speaker_by_overlap() -> None:
     merger = SpeakerTimelineMerger(max_speakers=8)
     merger.update_segments(

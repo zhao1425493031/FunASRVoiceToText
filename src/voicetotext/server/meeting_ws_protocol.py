@@ -62,6 +62,10 @@ class MeetingWSSession:
         if callable(set_lang):
             set_lang(self._session_config.language)
 
+        begin_spk = getattr(self.engine, "begin_speaker_session", None)
+        if callable(begin_spk):
+            begin_spk()
+
         participant_id = str(msg.get("participant_id", "")).strip() or None
         self._participant_id = participant_id
         client_speaker_id: int | None = None
@@ -141,6 +145,9 @@ class MeetingWSSession:
         clear_lang = getattr(self.engine, "set_session_language", None)
         if callable(clear_lang):
             clear_lang(None)
+        end_spk = getattr(self.engine, "end_speaker_session", None)
+        if callable(end_spk):
+            end_spk()
         if self._worker_task is not None:
             await self._pcm_queue.put(None)
             try:

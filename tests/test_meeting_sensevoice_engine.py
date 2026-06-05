@@ -21,20 +21,25 @@ def meeting_config():
     return load_config(ROOT / "config.meeting.yaml")
 
 
+@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_load_starts_pyannote(mock_py, mock_asr, mock_vad, meeting_config) -> None:
+def test_load_starts_pyannote(
+    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+) -> None:
     os.environ["HF_TOKEN"] = "hf_test_token"
     mock_vad.return_value.is_loaded = True
     mock_asr.return_value.is_loaded = True
     mock_py.return_value.is_loaded = True
     mock_py.return_value.hf_token.return_value = "hf_test_token"
+    mock_emb.return_value.is_loaded = True
 
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine.load()
     assert engine.is_loaded
     mock_py.return_value.start.assert_called_once()
+    mock_emb.return_value.load.assert_called_once()
     del os.environ["HF_TOKEN"]
 
 
@@ -113,3 +118,35 @@ def test_set_session_language_passed_to_asr(
     engine.transcribe_window(np.zeros(1600, dtype=np.float32), {}, is_final=False)
     asr.transcribe.assert_called_once()
     assert asr.transcribe.call_args.kwargs["language"] == "zh"
+
+
+@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
+def test_begin_speaker_session_resets_workers(
+    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+) -> None:
+    engine = MeetingSenseVoiceEngine(meeting_config)
+    engine._ready = True
+    engine.begin_speaker_session()
+    mock_py.return_value.reset_session.assert_called_once()
+    mock_emb.return_value.reset_session.assert_called_once()
+
+
+@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
+def test_resolve_speaker_uses_embedding_when_pyannote_single_label(
+    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+) -> None:
+    engine = MeetingSenseVoiceEngine(meeting_config)
+    engine._ready = True
+    mock_py.return_value.speaker_label_count.return_value = 1
+    mock_py.return_value.get_segments.return_value = []
+    mock_emb.return_value.assign_from_audio.return_value = 1
+    audio = np.zeros(8000, dtype=np.float32)
+    spk, changed = engine.resolve_speaker(0, 1000, audio=audio)
+    assert spk == 1
+    mock_emb.return_value.assign_from_audio.assert_called_once()
