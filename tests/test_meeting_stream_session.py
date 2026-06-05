@@ -19,8 +19,10 @@ class MockEngine:
     device = "cpu"
     backend_name = "mock"
 
-    def __init__(self) -> None:
+    def __init__(self, *, finalize_text: str = "final sentence") -> None:
         self._calls = 0
+        self._finalize_calls = 0
+        self._finalize_text = finalize_text
         self.config = load_config(ROOT / "config.meeting.yaml")
 
     @property
@@ -40,7 +42,8 @@ class MockEngine:
         return "partial"
 
     def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
-        return "final sentence"
+        self._finalize_calls += 1
+        return self._finalize_text
 
     def finalize_text(self, text: str) -> str:
         return text.strip()
@@ -94,6 +97,30 @@ def test_silence_emits_final(meeting_config) -> None:
     finals = [m for m in msgs if m["type"] == "final"]
     assert len(finals) == 1
     assert finals[0]["text"] == "final sentence"
+
+
+def test_short_fragment_defers_until_long_silence(meeting_config) -> None:
+    cfg = replace(
+        meeting_config,
+        meeting_min_finalize_chars=20,
+        meeting_min_utterance_ms=500,
+        vad_silence_ms=1500,
+        vad_silence_long_ms=3000,
+        meeting_emit_partial=False,
+    )
+    engine = MockEngine(finalize_text="早上好")
+    session = MeetingStreamSession(engine, cfg)
+    session.feed_pcm(_pcm_chunk(cfg, loud=True))
+    session._last_voice_ts = time.time() - 2.0
+    msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
+    assert not any(m["type"] == "final" for m in msgs)
+    assert session._finalize_deferred
+
+    session._last_voice_ts = time.time() - 3.5
+    msgs = session.feed_pcm(_pcm_chunk(cfg, loud=False))
+    finals = [m for m in msgs if m["type"] == "final"]
+    assert len(finals) == 1
+    assert engine._finalize_calls == 1
 
 
 def test_short_pause_does_not_finalize(meeting_config) -> None:

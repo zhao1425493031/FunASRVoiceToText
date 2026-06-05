@@ -44,6 +44,7 @@ class AppConfig:
     meeting_partial_interval_ms: int
     meeting_partial_min_ms: int
     meeting_min_utterance_ms: int
+    meeting_reuse_partial_for_final: bool
     vad_silence_long_ms: int
     vad_model: str
     qwen_partial_model: str
@@ -295,6 +296,12 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 2000)),
         meeting_partial_min_ms=int(raw.get("meeting_partial_min_ms", 800)),
         meeting_min_utterance_ms=int(raw.get("meeting_min_utterance_ms", 1600)),
+        meeting_reuse_partial_for_final=bool(
+            raw.get(
+                "meeting_reuse_partial_for_final",
+                str(raw.get("device", "cpu")).lower() == "cpu",
+            )
+        ),
         vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 2600)),
         vad_model=str(raw.get("vad_model", "fsmn-vad")),
         qwen_partial_model=str(raw.get("qwen_partial_model", "Qwen/Qwen3-ASR-0.6B")),

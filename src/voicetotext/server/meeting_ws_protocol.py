@@ -90,9 +90,12 @@ class MeetingWSSession:
                 except Exception as exc:
                     logger.warning("Meeting feed_pcm failed: %s", exc)
                     continue
-                if messages and not await self._send_messages(messages):
-                    logger.warning("Meeting subtitle send failed (client disconnected)")
-                    break
+                if messages and not self._closed:
+                    if not await self._send_messages(messages):
+                        logger.warning(
+                            "Meeting subtitle send failed (client disconnected)"
+                        )
+                        break
             finally:
                 self._pcm_queue.task_done()
 
@@ -120,7 +123,10 @@ class MeetingWSSession:
             clear_lang(None)
         if self._worker_task is not None:
             await self._pcm_queue.put(None)
-            await self._worker_task
+            try:
+                await asyncio.wait_for(self._worker_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                self._worker_task.cancel()
             self._worker_task = None
         self._stream = None
 

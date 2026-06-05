@@ -32,15 +32,30 @@ class MeetingQwenEngine:
     def is_loaded(self) -> bool:
         return self._ready
 
+    def _reuse_partial_for_final(self) -> bool:
+        return self.config.meeting_reuse_partial_for_final
+
     def load(self) -> None:
         self._vad.load()
         self._partial.load()
-        self._final.load()
+        if self._reuse_partial_for_final():
+            self._final = self._partial
+            logger.info(
+                "MeetingQwenEngine CPU-fast: reusing partial model for final (%s)",
+                self.config.qwen_partial_model,
+            )
+        else:
+            self._final.load()
         self._pyannote.load()
         self._pyannote.start()
         self._ready = True
-        logger.info("MeetingQwenEngine ready (partial=%s final=%s)", 
-                    self.config.qwen_partial_model, self.config.qwen_final_model)
+        final_model = (
+            self.config.qwen_partial_model
+            if self._reuse_partial_for_final()
+            else self.config.qwen_final_model
+        )
+        logger.info("MeetingQwenEngine ready (partial=%s final=%s)",
+                    self.config.qwen_partial_model, final_model)
 
     def shutdown(self) -> None:
         self._pyannote.stop()
@@ -76,12 +91,15 @@ class MeetingQwenEngine:
         return text.strip()
 
     def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
+        draft = draft_fallback.strip()
+        if self._reuse_partial_for_final() and draft:
+            return self.finalize_text(draft)
         cache: dict = {}
         lang = self._active_language()
         text = self._final.transcribe(audio, cache, is_final=True, language=lang)
         if text:
             return self.finalize_text(text)
-        return self.finalize_text(draft_fallback)
+        return self.finalize_text(draft)
 
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         if sample_rate != self.config.sample_rate:

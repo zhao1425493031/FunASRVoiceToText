@@ -35,6 +35,7 @@ class MeetingStreamSession:
         self._last_partial_at = 0.0
         self._last_partial_text = ""
         self._last_speaker_id = 0
+        self._finalize_deferred = False
 
     def _elapsed_ms(self) -> int:
         return int((time.time() - self._session_start) * 1000)
@@ -57,19 +58,26 @@ class MeetingStreamSession:
         return (time.time() - self._last_voice_ts) * 1000.0
 
     def _should_defer_finalize(self, text: str) -> bool:
+        """Short transcripts need a longer pause so phrases merge into one line."""
+        text = text.strip()
+        if not text:
+            return False
+        if len(text) >= self.config.meeting_min_finalize_chars:
+            return False
+        return self._silence_elapsed_ms() < self.config.vad_silence_long_ms
+
+    def _finalize_silence_threshold_ms(self) -> int:
         spoken_ms = self._utterance_duration_ms()
-        min_chars = self.config.meeting_min_finalize_chars
-        min_ms = self.config.meeting_min_utterance_ms
-        if len(text.strip()) < min_chars and spoken_ms < min_ms:
-            return True
-        return False
+        if spoken_ms < self.config.meeting_min_utterance_ms:
+            return self.config.vad_silence_long_ms
+        return self.config.vad_silence_ms
 
     def _can_finalize(self) -> bool:
         silence = self._silence_elapsed_ms()
-        spoken_ms = self._utterance_duration_ms()
-        if spoken_ms < self.config.meeting_min_utterance_ms:
-            return silence >= self.config.vad_silence_long_ms
-        return silence >= self.config.vad_silence_ms
+        threshold = self._finalize_silence_threshold_ms()
+        if self._finalize_deferred:
+            threshold = max(threshold, self.config.vad_silence_long_ms)
+        return silence >= threshold
 
     def _should_emit_partial_text(self, new_text: str) -> bool:
         old = self._last_partial_text
@@ -187,6 +195,7 @@ class MeetingStreamSession:
                 self._utterance_start_ms = self._elapsed_ms()
                 self._utterance_seg_id = new_seg_id()
                 self._last_partial_text = ""
+            self._finalize_deferred = False
             self._last_voice_ts = time.time()
             self._utterance_chunks.append(audio)
 
@@ -206,14 +215,20 @@ class MeetingStreamSession:
         if utterance.size == 0:
             return []
 
-        text = self.engine.finalize_utterance(utterance, self._last_partial_text)
-        if not text:
-            self._reset_utterance()
-            return []
-
-        if self._should_defer_finalize(text):
-            logger.debug("Defer finalize (short fragment): %s", text[:32])
-            return []
+        if self._finalize_deferred:
+            text = self._last_partial_text.strip()
+            if not text or self._should_defer_finalize(text):
+                return []
+        else:
+            text = self.engine.finalize_utterance(utterance, self._last_partial_text)
+            if not text:
+                self._reset_utterance()
+                return []
+            if self._should_defer_finalize(text):
+                self._finalize_deferred = True
+                self._last_partial_text = text
+                logger.debug("Defer finalize (short fragment): %s", text[:32])
+                return []
 
         out = self._map_text(
             text,
@@ -230,6 +245,7 @@ class MeetingStreamSession:
         self._last_voice_ts = time.time()
         self._last_partial_at = 0.0
         self._last_partial_text = ""
+        self._finalize_deferred = False
 
     def finalize_all(self) -> list[dict[str, Any]]:
         return self._finalize_utterance()

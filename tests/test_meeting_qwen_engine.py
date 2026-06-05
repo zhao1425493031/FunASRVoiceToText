@@ -62,6 +62,26 @@ def test_resolve_speaker_single_mode(
 @patch("voicetotext.asr.meeting_qwen_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_qwen_engine.QwenFunASREngine")
 @patch("voicetotext.asr.meeting_qwen_engine.PyannoteWorker")
+def test_finalize_reuses_partial_when_configured(
+    mock_py, mock_qwen, mock_vad, meeting_config
+) -> None:
+    from dataclasses import replace
+
+    cfg = replace(meeting_config, meeting_reuse_partial_for_final=True)
+    engine = MeetingQwenEngine(cfg)
+    import numpy as np
+
+    out = engine.finalize_utterance(
+        np.zeros(1600, dtype=np.float32),
+        "draft from partial",
+    )
+    assert out == "draft from partial"
+    mock_qwen.return_value.transcribe.assert_not_called()
+
+
+@patch("voicetotext.asr.meeting_qwen_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_qwen_engine.QwenFunASREngine")
+@patch("voicetotext.asr.meeting_qwen_engine.PyannoteWorker")
 def test_set_session_language_passed_to_partial(
     mock_py, mock_qwen, mock_vad, meeting_config
 ) -> None:

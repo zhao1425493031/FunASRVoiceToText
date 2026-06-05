@@ -28,8 +28,14 @@ def is_websocket_disconnected(exc: BaseException) -> bool:
     name = type(exc).__name__
     if name in ("WebSocketDisconnect", "ClientDisconnected"):
         return True
-    if isinstance(exc, RuntimeError) and "close message has been sent" in str(exc):
-        return True
+    if isinstance(exc, RuntimeError):
+        msg = str(exc)
+        if (
+            "close message has been sent" in msg
+            or "websocket.close" in msg
+            or "response already completed" in msg
+        ):
+            return True
     return False
 
 

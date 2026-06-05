@@ -38,22 +38,24 @@ secrets_file: "secrets.meeting.yaml"
 
 # 帧级能量阈值（仅 VAD 后备，非主切段）
 vad_energy_threshold: 0.008
-# 句末静音时长（毫秒），达到后触发 final
-vad_silence_ms: 1500
+# 句末静音时长（毫秒），达到后触发 final（企业场景建议 2.5s+，避免句中停顿被切断）
+vad_silence_ms: 2800
 # 短句/未达最短发言时长时，需更长静音才 final
-vad_silence_long_ms: 2600
+vad_silence_long_ms: 4200
 # 单段发言最短时长（毫秒），过短则与下句合并
-meeting_min_utterance_ms: 1600
-# 定稿最少字符数，过短片段会延迟 final
-meeting_min_finalize_chars: 15
+meeting_min_utterance_ms: 2200
+# 定稿最少字符数；不足此长度需更长静音才定稿，避免一句拆多行
+meeting_min_finalize_chars: 18
+# CPU 本地调试：定稿复用 partial 结果，跳过 1.7B 二次推理（GPU 生产请改 false）
+meeting_reuse_partial_for_final: true
 # partial 最少字符数，低于此不推送中间结果
 min_partial_chars: 1
 # 是否推送 partial 中间字幕
 meeting_emit_partial: true
-# partial 最小推送间隔（毫秒）
-meeting_partial_interval_ms: 2000
+# partial 最小推送间隔（毫秒）；CPU 上 Qwen 非真流式，间隔太短会卡顿
+meeting_partial_interval_ms: 4000
 # 发言至少持续多久才允许发 partial（毫秒）
-meeting_partial_min_ms: 800
+meeting_partial_min_ms: 1500
 
 # 流式 ASR 块大小 [解码相关参数，与 FunASR 一致]
 chunk_size: [0, 10, 5]

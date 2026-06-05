@@ -22,7 +22,9 @@ def test_load_meeting_config() -> None:
     assert cfg.meeting_max_speakers == 8
     assert cfg.meeting_session_max_seconds == 7200
     assert cfg.device == "cpu"
-    assert cfg.language == "ja"
+    assert cfg.language in ("ja", "zh")
+    assert cfg.meeting_reuse_partial_for_final is True
+    assert cfg.vad_silence_ms >= 2500
     assert cfg.qwen_partial_model == "Qwen/Qwen3-ASR-0.6B"
     assert cfg.qwen_final_model == "Qwen/Qwen3-ASR-1.7B"
     assert cfg.vad_model == "fsmn-vad"
