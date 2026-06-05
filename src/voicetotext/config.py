@@ -322,7 +322,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_max_utterance_ms=int(raw.get("meeting_max_utterance_ms", 60000)),
         meeting_use_fsmn_endpoint=bool(raw.get("meeting_use_fsmn_endpoint", True)),
         vad_energy_threshold=float(raw.get("vad_energy_threshold", 0.012)),
-        vad_speech_onset_chunks=int(raw.get("vad_speech_onset_chunks", 2)),
+        vad_speech_onset_chunks=int(raw.get("vad_speech_onset_chunks", 1)),
         min_partial_chars=int(raw.get("min_partial_chars", 1)),
         log_dir=str(raw.get("log_dir", "logs")),
         sample_rate=int(raw.get("sample_rate", 16000)),
@@ -337,17 +337,17 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_session_max_seconds=int(raw.get("meeting_session_max_seconds", 7200)),
         meeting_use_diarization=bool(raw.get("meeting_use_diarization", True)),
         meeting_spk_mode=str(raw.get("meeting_spk_mode", "multi")).lower(),
-        meeting_spk_source=str(raw.get("meeting_spk_source", "hybrid")).lower(),
+        meeting_spk_source=str(raw.get("meeting_spk_source", "pyannote")).lower(),
         meeting_min_finalize_chars=int(raw.get("meeting_min_finalize_chars", 2)),
         meeting_emit_partial=bool(raw.get("meeting_emit_partial", True)),
-        meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 1200)),
+        meeting_partial_interval_ms=int(raw.get("meeting_partial_interval_ms", 1000)),
         meeting_partial_min_ms=int(raw.get("meeting_partial_min_ms", 500)),
         meeting_min_utterance_ms=int(raw.get("meeting_min_utterance_ms", 400)),
         meeting_reuse_partial_for_final=bool(
             raw.get("meeting_reuse_partial_for_final", False)
         ),
         meeting_spk_change_finalize=bool(
-            raw.get("meeting_spk_change_finalize", True)
+            raw.get("meeting_spk_change_finalize", False)
         ),
         meeting_partial_max_sec=float(raw.get("meeting_partial_max_sec", 0)),
         vad_silence_long_ms=int(raw.get("vad_silence_long_ms", 1600)),
@@ -363,7 +363,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         pyannote_max_speakers=int(raw.get("pyannote_max_speakers", 0)),
         pyannote_hf_token_env=str(raw.get("pyannote_hf_token_env", "HF_TOKEN")),
         meeting_use_utterance_embedding=bool(
-            raw.get("meeting_use_utterance_embedding", True)
+            raw.get("meeting_use_utterance_embedding", False)
         ),
         meeting_spk_embedding_model=str(
             raw.get(
@@ -374,7 +374,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_spk_embedding_threshold=float(
             raw.get("meeting_spk_embedding_threshold", 0.72)
         ),
-        meeting_spk_primary=str(raw.get("meeting_spk_primary", "embedding")).lower(),
+        meeting_spk_primary=str(raw.get("meeting_spk_primary", "pyannote")).lower(),
         meeting_pyannote_min_overlap_ms=int(
             raw.get("meeting_pyannote_min_overlap_ms", 200)
         ),

@@ -33,13 +33,12 @@ def test_load_starts_pyannote(
     mock_asr.return_value.is_loaded = True
     mock_py.return_value.is_loaded = True
     mock_py.return_value.hf_token.return_value = "hf_test_token"
-    mock_emb.return_value.is_loaded = True
 
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine.load()
     assert engine.is_loaded
     mock_py.return_value.start.assert_called_once()
-    mock_emb.return_value.load.assert_called_once()
+    mock_emb.return_value.load.assert_not_called()
     del os.environ["HF_TOKEN"]
 
 
@@ -70,42 +69,32 @@ def test_resolve_speaker_single_mode(
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_finalize_reuses_partial_when_configured(
+def test_finalize_always_runs_full_asr(
     mock_py, mock_asr, mock_vad, meeting_config
 ) -> None:
-    cfg = replace(
-        meeting_config,
-        meeting_reuse_partial_for_final=True,
-        meeting_partial_max_sec=4.0,
-    )
-    engine = MeetingSenseVoiceEngine(cfg)
-    out = engine.finalize_utterance(
-        np.zeros(1600, dtype=np.float32),
-        "draft from partial",
-    )
-    assert out == "draft from partial"
-    mock_asr.return_value.transcribe.assert_not_called()
+    engine = MeetingSenseVoiceEngine(meeting_config)
+    mock_asr.return_value.transcribe.return_value = "full sentence"
+    audio = np.zeros(1600, dtype=np.float32)
+
+    out = engine.finalize_utterance(audio, "partial draft")
+
+    assert out == "full sentence"
+    mock_asr.return_value.transcribe.assert_called_once()
 
 
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_finalize_reruns_asr_when_utterance_longer_than_partial_window(
+def test_finalize_falls_back_to_draft_when_asr_empty(
     mock_py, mock_asr, mock_vad, meeting_config
 ) -> None:
-    cfg = replace(
-        meeting_config,
-        meeting_reuse_partial_for_final=True,
-        meeting_partial_max_sec=4.0,
-        sample_rate=16000,
-    )
-    engine = MeetingSenseVoiceEngine(cfg)
-    mock_asr.return_value.transcribe.return_value = "full sentence"
-    audio = np.zeros(int(16000 * 8), dtype=np.float32)
+    engine = MeetingSenseVoiceEngine(meeting_config)
+    mock_asr.return_value.transcribe.return_value = ""
+    audio = np.zeros(1600, dtype=np.float32)
 
-    out = engine.finalize_utterance(audio, "tail only draft")
+    out = engine.finalize_utterance(audio, "partial draft")
 
-    assert out == "full sentence"
+    assert out == "partial draft"
     mock_asr.return_value.transcribe.assert_called_once()
 
 
@@ -124,12 +113,11 @@ def test_transcribe_window_passes_language(
     assert asr.transcribe.call_args.kwargs["language"] == "zh"
 
 
-@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
 def test_open_speaker_context_binds_pyannote(
-    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+    mock_py, mock_asr, mock_vad, meeting_config
 ) -> None:
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine._ready = True
@@ -139,43 +127,15 @@ def test_open_speaker_context_binds_pyannote(
     mock_py.return_value.unbind_session.assert_called_once_with(ctx)
 
 
-@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
 @patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
 @patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_resolve_speaker_embedding_primary_even_when_pyannote_has_two_labels(
-    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+def test_resolve_speaker_uses_pyannote_when_overlap_reliable(
+    mock_py, mock_asr, mock_vad, meeting_config
 ) -> None:
     engine = MeetingSenseVoiceEngine(meeting_config)
     engine._ready = True
-    engine._embedding = mock_emb.return_value
-    mock_emb.return_value.assign_from_audio.return_value = 1
-    ctx = engine.open_speaker_context("sess-emb")
-    ctx.merger._label_to_id = {"SPEAKER_00": 0}
-    audio = np.zeros(8000, dtype=np.float32)
-
-    def fake_overlap(s: int, e: int) -> tuple[str, int]:
-        return "SPEAKER_00", 500
-
-    ctx.merger.best_overlap_label = fake_overlap  # type: ignore[method-assign]
-    spk, _ = engine.resolve_speaker(ctx, 0, 1000, audio=audio)
-    assert spk == 1
-    mock_emb.return_value.assign_from_audio.assert_called_once()
-    engine.close_speaker_context(ctx)
-
-
-@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
-@patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
-@patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
-@patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
-def test_resolve_speaker_falls_back_to_pyannote_when_embedding_misses(
-    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
-) -> None:
-    engine = MeetingSenseVoiceEngine(meeting_config)
-    engine._ready = True
-    engine._embedding = mock_emb.return_value
-    mock_emb.return_value.assign_from_audio.return_value = None
-    ctx = engine.open_speaker_context("sess-fb")
+    ctx = engine.open_speaker_context("sess-py")
 
     from voicetotext.asr.speaker_timeline import DiarizationSegment
 
@@ -183,9 +143,32 @@ def test_resolve_speaker_falls_back_to_pyannote_when_embedding_misses(
         DiarizationSegment(start_ms=0, end_ms=2000, speaker_label="SPEAKER_01"),
     ]
     ctx.merger._label_to_id = {"SPEAKER_01": 1}
-    spk, changed = engine.resolve_speaker(
-        ctx, 100, 1500, audio=np.zeros(8000, dtype=np.float32)
-    )
+    spk, changed = engine.resolve_speaker(ctx, 100, 1500)
     assert spk == 1
     assert changed is True
+    engine.close_speaker_context(ctx)
+
+
+@patch("voicetotext.asr.meeting_sensevoice_engine.UtteranceSpeakerEngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_sensevoice_engine.SenseVoiceFunASREngine")
+@patch("voicetotext.asr.meeting_sensevoice_engine.PyannoteWorker")
+def test_resolve_speaker_falls_back_to_embedding_when_overlap_low(
+    mock_py, mock_asr, mock_vad, mock_emb, meeting_config
+) -> None:
+    cfg = replace(meeting_config, meeting_use_utterance_embedding=True)
+    engine = MeetingSenseVoiceEngine(cfg)
+    engine._ready = True
+    engine._embedding = mock_emb.return_value
+    mock_emb.return_value.assign_from_audio.return_value = 2
+    ctx = engine.open_speaker_context("sess-emb")
+    audio = np.zeros(8000, dtype=np.float32)
+
+    def fake_overlap(_s: int, _e: int) -> tuple[str, int]:
+        return "SPEAKER_00", 50
+
+    ctx.merger.best_overlap_label = fake_overlap  # type: ignore[method-assign]
+    spk, _ = engine.resolve_speaker(ctx, 0, 1000, audio=audio)
+    assert spk == 2
+    mock_emb.return_value.assign_from_audio.assert_called_once()
     engine.close_speaker_context(ctx)

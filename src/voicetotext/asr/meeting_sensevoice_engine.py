@@ -49,9 +49,6 @@ class MeetingSenseVoiceEngine:
     def is_loaded(self) -> bool:
         return self._ready
 
-    def _reuse_partial_for_final(self) -> bool:
-        return self.config.meeting_reuse_partial_for_final
-
     def uses_pyannote(self) -> bool:
         if self.config.meeting_spk_mode != "multi" or not self.config.meeting_use_diarization:
             return False
@@ -141,14 +138,6 @@ class MeetingSenseVoiceEngine:
             return 0.0
         return audio.size / self.config.sample_rate
 
-    def _can_reuse_partial_draft(self, audio: np.ndarray, draft: str) -> bool:
-        if not self._reuse_partial_for_final() or not draft:
-            return False
-        max_sec = self.config.meeting_partial_max_sec
-        if max_sec <= 0:
-            return True
-        return self._utterance_seconds(audio) <= max_sec
-
     def load(self) -> None:
         self._tune_cpu_threads()
         self._vad.load()
@@ -217,16 +206,13 @@ class MeetingSenseVoiceEngine:
         *,
         language: str | None = None,
     ) -> str:
-        draft = draft_fallback.strip()
-        if self._can_reuse_partial_draft(audio, draft):
-            return self.finalize_text(draft)
         cache: dict = {}
         lang = language or self.config.language
         with self._inference_lock:
             text = self._asr.transcribe(audio, cache, is_final=True, language=lang)
         if text:
             return self.finalize_text(text)
-        return self.finalize_text(draft)
+        return self.finalize_text(draft_fallback.strip())
 
     def transcribe_file(self, audio: np.ndarray, sample_rate: int) -> str:
         if sample_rate != self.config.sample_rate:
@@ -285,69 +271,27 @@ class MeetingSenseVoiceEngine:
         if not self.uses_pyannote():
             return 0, False
 
-        merger = ctx.merger
-        primary = self.config.meeting_spk_primary
         min_overlap = self.config.meeting_pyannote_min_overlap_ms
         py_id, py_overlap, py_changed = self._pyannote_assignment(ctx, t_start_ms, t_end_ms)
-        py_reliable = py_overlap >= min_overlap
+        if py_overlap >= min_overlap:
+            return py_id, py_changed
+
         emb_id = self._embedding_assignment(ctx, audio)
-
-        if primary == "pyannote":
-            if py_reliable:
-                return py_id, py_changed
-            if emb_id is not None:
-                logger.info("Speaker pyannote-unreliable -> embedding id=%d", emb_id)
-                return merger.force_speaker_id(emb_id)
-            return py_id, py_changed
-
-        if primary == "fusion":
-            if emb_id is not None and py_reliable:
-                if emb_id != py_id:
-                    logger.info(
-                        "Speaker fusion: embedding=%d pyannote=%d -> embedding",
-                        emb_id,
-                        py_id,
-                    )
-                return merger.force_speaker_id(emb_id)
-            if emb_id is not None:
-                return merger.force_speaker_id(emb_id)
-            if py_reliable:
-                return py_id, py_changed
-            return merger.last_speaker_id, False
-
         if emb_id is not None:
-            if py_reliable and emb_id != py_id:
-                logger.info(
-                    "Speaker embedding-primary id=%d (pyannote=%d overlap=%dms)",
-                    emb_id,
-                    py_id,
-                    py_overlap,
-                )
-            return merger.force_speaker_id(emb_id)
-        if py_reliable:
-            logger.info("Speaker embedding-miss -> pyannote id=%d", py_id)
-            return py_id, py_changed
-        return merger.last_speaker_id, False
-
-    def current_speaker_id(self, ctx: SpeakerSessionContext) -> int | None:
-        if ctx.registry.speaker_count > 0:
-            return ctx.registry.last_speaker_id
-        if ctx.merger.last_speaker_id >= 0:
-            return ctx.merger.last_speaker_id
-        return None
+            logger.info("Speaker pyannote-unreliable -> embedding id=%d", emb_id)
+            return ctx.merger.force_speaker_id(emb_id)
+        return py_id, py_changed
 
     def speaker_at_ms(self, ctx: SpeakerSessionContext, t_ms: int) -> int | None:
         if not self.uses_pyannote():
             return None
-        if self.config.meeting_spk_primary in ("embedding", "fusion"):
-            current = self.current_speaker_id(ctx)
-            if current is not None:
-                return current
         self.sync_timeline(ctx)
         point = ctx.merger.speaker_at_ms(t_ms)
         if point is not None:
             return point
-        return self.current_speaker_id(ctx)
+        if ctx.merger.last_speaker_id >= 0:
+            return ctx.merger.last_speaker_id
+        return None
 
     async def check_ready(self) -> bool:
         if not self._ready:

@@ -25,23 +25,24 @@ def test_load_meeting_config() -> None:
     assert cfg.device == "auto"
     assert cfg.language in ("ja", "zh")
     assert cfg.meeting_spk_source == "pyannote"
-    assert cfg.meeting_reuse_partial_for_final is True
+    assert cfg.meeting_reuse_partial_for_final is False
     assert cfg.meeting_partial_max_sec == 0.0
     assert cfg.meeting_use_fsmn_endpoint is True
     assert cfg.vad_speech_hangover_ms >= 200
     assert cfg.vad_energy_threshold >= 0.01
-    assert cfg.vad_speech_onset_chunks >= 2
-    assert cfg.meeting_min_finalize_chars >= 10
-    assert cfg.min_partial_chars >= 4
-    assert cfg.meeting_min_utterance_ms >= 600
+    assert cfg.vad_speech_onset_chunks >= 1
+    assert cfg.meeting_min_finalize_chars >= 2
+    assert cfg.min_partial_chars >= 1
+    assert cfg.meeting_min_utterance_ms >= 400
     assert cfg.asr_model == "iic/SenseVoiceSmall"
     assert cfg.vad_model == "fsmn-vad"
     assert "meeting" in cfg.api_key_scopes
     assert cfg.pyannote_context_sec == 60.0
-    assert cfg.meeting_use_utterance_embedding is True
+    assert cfg.meeting_use_utterance_embedding is False
     assert "campplus" in cfg.meeting_spk_embedding_model
     assert cfg.meeting_spk_embedding_threshold == 0.72
-    assert cfg.meeting_spk_primary == "embedding"
+    assert cfg.meeting_spk_primary == "pyannote"
+    assert cfg.meeting_spk_change_finalize is False
     assert cfg.meeting_pyannote_min_overlap_ms == 200
 
 

@@ -7,8 +7,6 @@ service_mode: "meeting"
 asr_backend: "meeting_sensevoice"
 # GPU 生产服务器请改:
 #   device: "cuda"
-#   meeting_reuse_partial_for_final: false
-#   meeting_partial_max_sec: 0
 device: "auto"
 language: "zh"
 
@@ -25,25 +23,25 @@ pyannote_max_speakers: 0
 pyannote_hf_token_env: "HF_TOKEN"
 secrets_file: "secrets.meeting.yaml"
 
-# 抗环境噪声：提高 RMS 门槛 + 连续块噪声门（见 vad_speech_onset_chunks）
-vad_energy_threshold: 0.02
-vad_speech_onset_chunks: 3
-vad_speech_hangover_ms: 250
-vad_silence_ms: 700
+# VAD：RMS 帧检测 + FSMN 句末 endpoint（行业标准叠层）
+vad_energy_threshold: 0.01
+vad_speech_onset_chunks: 1
+vad_speech_hangover_ms: 300
+vad_silence_ms: 800
 vad_silence_long_ms: 1200
 meeting_use_fsmn_endpoint: true
 meeting_max_utterance_ms: 30000
-meeting_min_utterance_ms: 600
-meeting_min_finalize_chars: 10
+meeting_min_utterance_ms: 400
+meeting_min_finalize_chars: 2
 
-# 定稿复用 partial 文本草稿，避免句末重复跑 ASR
-meeting_reuse_partial_for_final: true
+# partial 预览整句递增识别；final 始终对整句完整 ASR
+meeting_reuse_partial_for_final: false
 meeting_partial_max_sec: 0
 
-min_partial_chars: 4
+min_partial_chars: 1
 meeting_emit_partial: true
-meeting_partial_interval_ms: 1200
-meeting_partial_min_ms: 800
+meeting_partial_interval_ms: 1000
+meeting_partial_min_ms: 500
 
 chunk_size: [0, 10, 5]
 sample_rate: 16000
@@ -60,14 +58,13 @@ meeting_session_max_seconds: 7200
 meeting_spk_mode: multi
 meeting_spk_source: "pyannote"
 meeting_use_diarization: true
-# Pyannote 检测到说话人切换时，提前定稿当前句并开新句
-meeting_spk_change_finalize: true
-# 企业级双通道：句级 campplus 为主（实时），Pyannote 长窗为辅（慢路径校正）
-meeting_use_utterance_embedding: true
-meeting_spk_primary: "embedding"
+# 句界由 VAD/FSMN 决定，不因 diarization 滞后强拆句
+meeting_spk_change_finalize: false
+# 说话人：Pyannote 时间轴为主（行业标准）
+meeting_use_utterance_embedding: false
+meeting_spk_primary: "pyannote"
 meeting_spk_embedding_model: "iic/speech_campplus_sv_zh-cn_16k-common"
 meeting_spk_embedding_threshold: 0.72
-# Pyannote 与句时间轴重叠低于此毫秒时不采信（避免全塌缩为话者1）
 meeting_pyannote_min_overlap_ms: 200
 
 ssl_certfile: "certs/cert.pem"
