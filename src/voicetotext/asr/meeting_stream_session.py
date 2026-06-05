@@ -148,6 +148,12 @@ class MeetingStreamSession:
                 "is_final": is_final,
             }
         )
+        logger.info(
+            "Meeting subtitle %s seg=%s chars=%d",
+            msg_type,
+            self._utterance_seg_id,
+            len(text),
+        )
         return out
 
     def _maybe_emit_partial(self, utterance: np.ndarray) -> list[dict[str, Any]]:

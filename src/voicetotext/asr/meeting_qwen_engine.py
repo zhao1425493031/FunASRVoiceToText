@@ -25,6 +25,7 @@ class MeetingQwenEngine:
         self._final = QwenFunASREngine(config, model_id=config.qwen_final_model)
         self._pyannote = PyannoteWorker(config)
         self._merger = SpeakerTimelineMerger(max_speakers=config.meeting_max_speakers)
+        self._session_language: str | None = None
         self._ready = False
 
     @property
@@ -59,17 +60,25 @@ class MeetingQwenEngine:
     def detect_speech(self, audio: np.ndarray) -> bool:
         return self._vad.detect_speech_frame(audio)
 
+    def set_session_language(self, language: str | None) -> None:
+        self._session_language = language
+
+    def _active_language(self) -> str:
+        return self._session_language or self.config.language
+
     def transcribe_window(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
+        lang = self._active_language()
         if is_final:
-            return self._final.transcribe(audio, cache, is_final=True)
-        return self._partial.transcribe(audio, cache, is_final=False)
+            return self._final.transcribe(audio, cache, is_final=True, language=lang)
+        return self._partial.transcribe(audio, cache, is_final=False, language=lang)
 
     def finalize_text(self, text: str) -> str:
         return text.strip()
 
     def finalize_utterance(self, audio: np.ndarray, draft_fallback: str) -> str:
         cache: dict = {}
-        text = self._final.transcribe(audio, cache, is_final=True)
+        lang = self._active_language()
+        text = self._final.transcribe(audio, cache, is_final=True, language=lang)
         if text:
             return self.finalize_text(text)
         return self.finalize_text(draft_fallback)

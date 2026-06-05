@@ -57,3 +57,19 @@ def test_resolve_speaker_single_mode(
     engine._ready = True
     spk, changed = engine.resolve_speaker(0, 1000)
     assert spk == 0
+
+
+@patch("voicetotext.asr.meeting_qwen_engine.FunASRVAD")
+@patch("voicetotext.asr.meeting_qwen_engine.QwenFunASREngine")
+@patch("voicetotext.asr.meeting_qwen_engine.PyannoteWorker")
+def test_set_session_language_passed_to_partial(
+    mock_py, mock_qwen, mock_vad, meeting_config
+) -> None:
+    engine = MeetingQwenEngine(meeting_config)
+    engine.set_session_language("zh")
+    partial = mock_qwen.return_value
+    import numpy as np
+
+    engine.transcribe_window(np.zeros(1600, dtype=np.float32), {}, is_final=False)
+    partial.transcribe.assert_called_once()
+    assert partial.transcribe.call_args.kwargs["language"] == "zh"

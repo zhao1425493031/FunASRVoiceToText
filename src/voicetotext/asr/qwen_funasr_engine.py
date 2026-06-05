@@ -64,15 +64,22 @@ class QwenFunASREngine:
         )
         self._ready = True
 
-    def _language_kw(self) -> dict[str, Any]:
-        lang = self.config.language.lower()
-        if lang == "ja":
-            return {"language": "ja"}
-        if lang == "zh":
-            return {"language": "zh"}
+    def _language_kw(self, language: str | None = None) -> dict[str, Any]:
+        """Map config codes (ja/zh) to Qwen3 full language names."""
+        lang = (language or self.config.language).lower()
+        qwen_lang = {"ja": "Japanese", "zh": "Chinese"}.get(lang)
+        if qwen_lang:
+            return {"language": qwen_lang}
         return {}
 
-    def transcribe(self, audio: np.ndarray, cache: dict, *, is_final: bool) -> str:
+    def transcribe(
+        self,
+        audio: np.ndarray,
+        cache: dict,
+        *,
+        is_final: bool,
+        language: str | None = None,
+    ) -> str:
         if self._model is None or audio.size == 0:
             return ""
         try:
@@ -81,7 +88,7 @@ class QwenFunASREngine:
                 "cache": cache,
                 "batch_size_s": 300,
             }
-            kw.update(self._language_kw())
+            kw.update(self._language_kw(language))
             if not is_final:
                 kw["chunk_size"] = self.config.chunk_size
                 kw["encoder_chunk_look_back"] = self.config.encoder_chunk_look_back
@@ -92,7 +99,9 @@ class QwenFunASREngine:
             return _extract_text(res)
         except TypeError:
             try:
-                res = self._model.generate(input=audio, batch_size_s=300)
+                fallback_kw: dict[str, Any] = {"input": audio, "batch_size_s": 300}
+                fallback_kw.update(self._language_kw(language))
+                res = self._model.generate(**fallback_kw)
                 return _extract_text(res)
             except Exception as exc:
                 logger.warning("Qwen transcribe failed: %s", exc)
