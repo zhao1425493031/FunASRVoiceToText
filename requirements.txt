@@ -1,0 +1,2 @@
+# Meeting v2 — use requirements-meeting.txt for full stack
+-r requirements-meeting.txt

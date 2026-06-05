@@ -1,0 +1,56 @@
+"""Meeting /ready logic tests."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from voicetotext.asr.meeting_qwen_engine import MeetingQwenEngine
+from voicetotext.config import load_config
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.asyncio
+async def test_check_ready_false_without_load() -> None:
+    cfg = load_config(ROOT / "config.meeting.yaml")
+    engine = MeetingQwenEngine(cfg)
+    assert await engine.check_ready() is False
+
+
+@pytest.mark.asyncio
+async def test_check_ready_true_when_mocked() -> None:
+    os.environ["HF_TOKEN"] = "hf_test"
+    cfg = load_config(ROOT / "config.meeting.yaml")
+    engine = MeetingQwenEngine(cfg)
+    engine._ready = True
+    engine._vad._ready = True
+    engine._vad._model = object()
+    engine._partial._ready = True
+    engine._partial._model = object()
+    engine._final._ready = True
+    engine._final._model = object()
+    engine._pyannote._ready = True
+    engine._pyannote._pipeline = object()
+    assert await engine.check_ready() is True
+    del os.environ["HF_TOKEN"]
+
+
+@pytest.mark.asyncio
+async def test_check_ready_false_without_hf_token_multi() -> None:
+    os.environ.pop("HF_TOKEN", None)
+    cfg = load_config(ROOT / "config.meeting.yaml")
+    engine = MeetingQwenEngine(cfg)
+    engine._ready = True
+    engine._vad._ready = True
+    engine._vad._model = object()
+    engine._partial._ready = True
+    engine._partial._model = object()
+    engine._final._ready = True
+    engine._final._model = object()
+    engine._pyannote._ready = True
+    engine._pyannote._pipeline = object()
+    assert await engine.check_ready() is False

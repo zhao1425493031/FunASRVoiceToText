@@ -1,0 +1,84 @@
+# 多人会议实时字幕 v2（Qwen3 + FSMN-VAD + Pyannote）
+# 启动: python scripts/run_meeting.py
+
+# 监听地址（0.0.0.0 表示本机所有网卡，供手机局域网访问）
+host: "0.0.0.0"
+# 服务端口（会议专用，与 Apache 反代 8766 一致）
+port: 8766
+# 服务模式（固定为 meeting，本仓库仅会议服务）
+service_mode: "meeting"
+# ASR 后端（v2 固定 meeting_qwen，勿用 embedded/SenseVoice）
+asr_backend: "meeting_qwen"
+# 推理设备（本地 Windows 用 cpu；GPU 服务器改为 cuda）
+device: "cpu"
+# 默认识别语言（ja 日语 / zh 中文；客户端 start 可覆盖，一场会议一种语言）
+language: "ja"
+
+# VAD 模型（FunASR fsmn-vad，用于句界与语音活动）
+vad_model: "fsmn-vad"
+# 流式中间字幕模型（partial，较快）
+qwen_partial_model: "Qwen/Qwen3-ASR-0.6B"
+# 句末定稿模型（final，较准）
+qwen_final_model: "Qwen/Qwen3-ASR-1.7B"
+# 模型下载源（hf = Hugging Face）
+funasr_hub: "hf"
+# 是否信任远程模型代码（Qwen3 需要 true）
+trust_remote_code: true
+
+# 说话人分离模型（Pyannote Community-1，需 HF_TOKEN 与许可）
+pyannote_model: "pyannote/speaker-diarization-community-1"
+# 滑窗分析时长（秒），越大越稳、越慢
+pyannote_window_sec: 10
+# 滑窗步长（秒），多久更新一次说话人时间轴
+pyannote_step_sec: 5
+# HuggingFace Token 的环境变量名
+pyannote_hf_token_env: "HF_TOKEN"
+
+# 帧级能量阈值（仅 VAD 后备，非主切段）
+vad_energy_threshold: 0.008
+# 句末静音时长（毫秒），达到后触发 final
+vad_silence_ms: 1500
+# 短句/未达最短发言时长时，需更长静音才 final
+vad_silence_long_ms: 2600
+# 单段发言最短时长（毫秒），过短则与下句合并
+meeting_min_utterance_ms: 1600
+# 定稿最少字符数，过短片段会延迟 final
+meeting_min_finalize_chars: 15
+# partial 最少字符数，低于此不推送中间结果
+min_partial_chars: 1
+# 是否推送 partial 中间字幕
+meeting_emit_partial: true
+# partial 最小推送间隔（毫秒）
+meeting_partial_interval_ms: 2000
+# 发言至少持续多久才允许发 partial（毫秒）
+meeting_partial_min_ms: 800
+
+# 流式 ASR 块大小 [解码相关参数，与 FunASR 一致]
+chunk_size: [0, 10, 5]
+# 音频采样率（Hz，与前端 PCM 一致）
+sample_rate: 16000
+# 日志目录（相对项目根）
+log_dir: "logs"
+
+# WebSocket/API 密钥（浏览器可注入页面；生产请更换）
+api_key: "meeting-dev-7k9m2p4x"
+# API Key 允许的权限范围
+api_key_scopes:
+  # 会议服务 scope
+  - meeting
+# 最大并发 WebSocket 连接数
+max_ws_connections: 10
+
+# 最多识别说话人数（speaker_id 0..N-1）
+meeting_max_speakers: 8
+# 单会话最长时长（秒），超限发 session_too_long
+meeting_session_max_seconds: 7200
+# 说话人模式（multi 多人 / single 单人固定話者1）
+meeting_spk_mode: multi
+# 是否启用 Pyannote 说话人分离（single 时可 false）
+meeting_use_diarization: true
+
+# HTTPS 证书路径（手机麦克风需 HTTPS）
+ssl_certfile: "certs/cert.pem"
+# HTTPS 私钥路径
+ssl_keyfile: "certs/key.pem"
