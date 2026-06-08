@@ -60,4 +60,9 @@ async def test_ready_200_when_engine_ready() -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ready"
+    llm = data.get("detail", {}).get("llm", {})
+    assert "enabled" in llm
+    assert "ready" in llm
+    assert "provider" in llm
+    assert "model" in llm
     del os.environ["HF_TOKEN"]

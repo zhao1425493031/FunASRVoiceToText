@@ -29,6 +29,10 @@ sequenceDiagram
     G->>C: pong
   end
   C->>G: end
+  G->>C: summary_progress
+  G->>G: LLM async summarize
+  G->>C: meeting_summary
+  G->>C: close
 ```
 
 后端 v3：`MeetingSenseVoiceEngine`（FSMN-VAD + SenseVoice + Pyannote），进程内推理，无独立 Runtime 容器。
@@ -67,8 +71,11 @@ sequenceDiagram
 ### end
 
 ```json
-{ "type": "end", "is_speaking": false }
+{ "type": "end", "is_speaking": false, "skip_summary": false }
 ```
+
+- `skip_summary: true` 时跳过会后纪要（不调 LLM、不落 summary.md）。
+- 发 `end` 后客户端应保持连接，直至收到 `meeting_summary` 或服务端关闭（最长 `llm.meeting_ws_wait_sec`）。
 
 ## 服务端 → 客户端
 
@@ -126,6 +133,48 @@ sequenceDiagram
 
 ```json
 { "type": "pong", "protocol_version": 2 }
+```
+
+### summary_progress（`llm.enabled=true` 且未 skip）
+
+```json
+{ "type": "summary_progress", "protocol_version": 2, "stage": "generating" }
+```
+
+### meeting_summary（成功）
+
+```json
+{
+  "type": "meeting_summary",
+  "protocol_version": 2,
+  "status": "ok",
+  "session_id": "uuid",
+  "summary": {
+    "title": "",
+    "overview": "",
+    "topics": [{"subject":"","discussion":"","conclusion":""}],
+    "decisions": [],
+    "action_items": [{"owner":"","task":"","due":""}],
+    "open_questions": [],
+    "markdown": "## 概要\n..."
+  },
+  "meta": { "provider": "openai_compatible", "model": "qwen-plus" },
+  "files": { "json": "out/meetings/uuid.json", "summary_md": "out/meetings/uuid.summary.md" }
+}
+```
+
+### meeting_summary（失败，`on_failure=warn`）
+
+```json
+{
+  "type": "meeting_summary",
+  "protocol_version": 2,
+  "status": "error",
+  "session_id": "uuid",
+  "error": "summary_failed",
+  "summary": null,
+  "files": { "json": "out/meetings/uuid.json" }
+}
 ```
 
 ## 错误码

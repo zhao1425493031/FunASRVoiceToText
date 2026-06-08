@@ -12,7 +12,3 @@ logs/*
 *.wav
 *.log
 model_cache/
-secrets.meeting.yaml
-certs/*.pem
-certs/openssl.cnf
-!certs/.gitkeep

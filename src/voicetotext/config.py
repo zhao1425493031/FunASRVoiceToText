@@ -67,6 +67,34 @@ class AppConfig:
     meeting_spk_embedding_threshold: float
     meeting_spk_primary: str
     meeting_pyannote_min_overlap_ms: int
+    llm_enabled: bool
+    llm_provider: str
+    llm_model: str
+    llm_api_url: str | None
+    llm_api_key: str | None
+    llm_temperature: float
+    llm_max_tokens: int
+    llm_timeout_sec: int
+    llm_max_input_chars: int
+    llm_chunk_chars: int
+    llm_retry_max: int
+    llm_retry_backoff_sec: float
+    llm_on_failure: str
+    llm_output_summary_md: bool
+    llm_api_version: str | None
+    llm_deployment: str | None
+    llm_meeting_output_dir: str
+    llm_meeting_ws_wait_sec: int
+
+    @property
+    def llm_ready(self) -> bool:
+        if not self.llm_enabled or self.llm_provider == "stub":
+            return False
+        return bool(self.llm_api_url and self.llm_model and self.llm_api_key)
+
+    @property
+    def llm_meeting_output_path(self) -> Path:
+        return PROJECT_ROOT / self.llm_meeting_output_dir
 
     @property
     def is_meeting_service(self) -> bool:
@@ -154,6 +182,124 @@ def _coerce_str_list(value: Any) -> tuple[str, ...]:
     return ()
 
 
+@dataclass(frozen=True)
+class LlmConfigParsed:
+    enabled: bool
+    provider: str
+    model: str
+    api_url: str | None
+    api_key: str | None
+    temperature: float
+    max_tokens: int
+    timeout_sec: int
+    max_input_chars: int
+    chunk_chars: int
+    retry_max: int
+    retry_backoff_sec: float
+    on_failure: str
+    output_summary_md: bool
+    api_version: str | None
+    deployment: str | None
+    meeting_output_dir: str
+    meeting_ws_wait_sec: int
+
+
+def _valid_llm_api_key(token: str) -> bool:
+    t = str(token).strip()
+    if len(t) < 10:
+        return False
+    placeholders = ("你的", "在这里粘贴", "paste your", "placeholder", "sk-xxxx", "sk-xxx")
+    lower = t.lower()
+    return not any(p in lower for p in placeholders)
+
+
+def _resolve_llm_api_key(config_key: str | None) -> str | None:
+    env_key = os.environ.get("DASHSCOPE_API_KEY", "").strip()
+    if env_key and _valid_llm_api_key(env_key):
+        return env_key
+    if config_key and _valid_llm_api_key(config_key):
+        return config_key
+    return None
+
+
+def _infer_llm_provider(
+    enabled: bool,
+    explicit: str,
+    api_url: str | None,
+    deployment: str | None,
+) -> str:
+    if not enabled:
+        return "stub"
+    if deployment:
+        return "azure"
+    if explicit and explicit not in ("", "stub", "auto"):
+        return explicit
+    if api_url:
+        return "openai_compatible"
+    return "stub"
+
+
+def _parse_llm(raw: dict[str, Any]) -> LlmConfigParsed:
+    llm = raw.get("llm") or {}
+    if not isinstance(llm, dict):
+        llm = {}
+
+    enabled = bool(llm.get("enabled", False))
+    api_url = _optional_str(llm.get("api_url"))
+    deployment = _optional_str(llm.get("deployment"))
+    explicit_provider = str(llm.get("provider", "")).strip()
+    provider = _infer_llm_provider(enabled, explicit_provider, api_url, deployment)
+    timeout_raw = llm.get("timeout_sec", llm.get("timeout", 120))
+    config_key = _optional_str(llm.get("api_key"))
+
+    return LlmConfigParsed(
+        enabled=enabled,
+        provider=provider,
+        model=str(llm.get("model", "")).strip(),
+        api_url=api_url,
+        api_key=_resolve_llm_api_key(config_key),
+        temperature=float(llm.get("temperature", 0.3)),
+        max_tokens=int(llm.get("max_tokens", 4096)),
+        timeout_sec=int(timeout_raw),
+        max_input_chars=int(llm.get("max_input_chars", 120000)),
+        chunk_chars=int(llm.get("chunk_chars", 30000)),
+        retry_max=int(llm.get("retry_max", 2)),
+        retry_backoff_sec=float(llm.get("retry_backoff_sec", 2.0)),
+        on_failure=str(llm.get("on_failure", "warn")).strip().lower(),
+        output_summary_md=bool(llm.get("output_summary_md", True)),
+        api_version=_optional_str(llm.get("api_version")),
+        deployment=deployment,
+        meeting_output_dir=str(llm.get("meeting_output_dir", "out/meetings")),
+        meeting_ws_wait_sec=int(llm.get("meeting_ws_wait_sec", 180)),
+    )
+
+
+def _validate_llm(llm: LlmConfigParsed) -> None:
+    if not llm.enabled or llm.provider == "stub":
+        return
+    if not llm.api_url:
+        raise ValueError("llm.enabled requires llm.api_url")
+    if not llm.model:
+        raise ValueError("llm.enabled requires llm.model")
+    if not llm.api_key:
+        raise ValueError("llm.enabled requires valid llm.api_key in config.meeting.yaml")
+    if not (0.0 <= llm.temperature <= 2.0):
+        raise ValueError(f"llm.temperature must be in [0, 2], got {llm.temperature}")
+    if not (256 <= llm.max_tokens <= 32768):
+        raise ValueError(f"llm.max_tokens must be in [256, 32768], got {llm.max_tokens}")
+    if not (5 <= llm.timeout_sec <= 600):
+        raise ValueError(f"llm.timeout must be in [5, 600], got {llm.timeout_sec}")
+    if llm.on_failure not in ("warn", "fail"):
+        raise ValueError(f"llm.on_failure must be 'warn' or 'fail', got {llm.on_failure}")
+    if llm.provider == "azure":
+        if not llm.deployment:
+            raise ValueError("llm.provider=azure requires llm.deployment")
+        if not llm.api_version:
+            raise ValueError("llm.provider=azure requires llm.api_version")
+    if llm.meeting_ws_wait_sec < 30:
+        raise ValueError("llm.meeting_ws_wait_sec must be >= 30")
+
+
 def _validate_config(raw: dict[str, Any]) -> None:
     service_mode = str(raw.get("service_mode", "meeting")).lower()
     if service_mode != "meeting":
@@ -200,6 +346,8 @@ def _validate_config(raw: dict[str, Any]) -> None:
             if os.environ.get("VOICETOTEXT_SKIP_HF_CHECK") != "1":
                 pass
 
+    _validate_llm(_parse_llm(raw))
+
 
 def _valid_hf_token(token: str) -> bool:
     t = str(token).strip()
@@ -241,6 +389,23 @@ def apply_meeting_secrets(config_path: Path | None = None) -> bool:
 
     os.environ[env_name] = str(token).strip()
     return True
+
+
+def require_llm_api_key(config_path: Path | None = None) -> None:
+    path = resolve_config_path(config_path)
+    if not path.is_file():
+        raise SystemExit("缺少配置文件，无法校验 LLM API Key。")
+    with path.open(encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    llm = _parse_llm(raw)
+    if not llm.enabled or llm.provider == "stub":
+        return
+    if llm.api_key:
+        return
+    raise SystemExit(
+        "缺少 LLM API Key。请在 config.meeting.yaml 的 llm.api_key 中配置，"
+        "或设置环境变量 DASHSCOPE_API_KEY。"
+    )
 
 
 def require_hf_token_for_meeting(config_path: Path | None = None) -> None:
@@ -303,6 +468,7 @@ def load_config(path: Path | None = None) -> AppConfig:
         raw = yaml.safe_load(f) or {}
 
     _validate_config(raw)
+    llm = _parse_llm(raw)
 
     port = int(raw.get("port", 8766))
     if not (1 <= port <= 65535):
@@ -378,4 +544,22 @@ def load_config(path: Path | None = None) -> AppConfig:
         meeting_pyannote_min_overlap_ms=int(
             raw.get("meeting_pyannote_min_overlap_ms", 200)
         ),
+        llm_enabled=llm.enabled,
+        llm_provider=llm.provider,
+        llm_model=llm.model,
+        llm_api_url=llm.api_url,
+        llm_api_key=llm.api_key,
+        llm_temperature=llm.temperature,
+        llm_max_tokens=llm.max_tokens,
+        llm_timeout_sec=llm.timeout_sec,
+        llm_max_input_chars=llm.max_input_chars,
+        llm_chunk_chars=llm.chunk_chars,
+        llm_retry_max=llm.retry_max,
+        llm_retry_backoff_sec=llm.retry_backoff_sec,
+        llm_on_failure=llm.on_failure,
+        llm_output_summary_md=llm.output_summary_md,
+        llm_api_version=llm.api_version,
+        llm_deployment=llm.deployment,
+        llm_meeting_output_dir=llm.meeting_output_dir,
+        llm_meeting_ws_wait_sec=llm.meeting_ws_wait_sec,
     )

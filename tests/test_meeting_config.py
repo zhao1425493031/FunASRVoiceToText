@@ -44,6 +44,13 @@ def test_load_meeting_config() -> None:
     assert cfg.meeting_spk_primary == "pyannote"
     assert cfg.meeting_spk_change_finalize is False
     assert cfg.meeting_pyannote_min_overlap_ms == 200
+    assert cfg.llm_enabled is True
+    assert cfg.llm_provider == "openai_compatible"
+    assert cfg.llm_model == "qwen-plus"
+    assert cfg.llm_api_url
+    assert cfg.llm_api_key
+    assert cfg.llm_meeting_output_dir == "out/meetings"
+    assert cfg.llm_meeting_ws_wait_sec == 180
 
 
 def test_resolve_device_cuda_fallback_when_unavailable() -> None:

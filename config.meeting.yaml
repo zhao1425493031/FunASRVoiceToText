@@ -69,3 +69,22 @@ meeting_pyannote_min_overlap_ms: 200
 
 ssl_certfile: "certs/cert.pem"
 ssl_keyfile: "certs/key.pem"
+
+llm:
+    enabled: true
+    api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen-plus"
+    api_key: "sk-db1e44404e4a4dd3a65e05b7f4f87e39"
+    temperature: 0.3
+    max_tokens: 8096
+    timeout: 120
+    max_input_chars: 120000
+    chunk_chars: 30000
+    retry_max: 2
+    retry_backoff_sec: 2
+    on_failure: warn
+    output_summary_md: true
+    meeting_output_dir: "out/meetings"
+    meeting_ws_wait_sec: 180
+    api_version: ""
+    deployment: ""

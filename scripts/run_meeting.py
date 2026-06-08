@@ -12,9 +12,10 @@ MEETING_CONFIG = ROOT / "config.meeting.yaml"
 sys.path.insert(0, str(ROOT / "src"))
 os.environ["VOICETOTEXT_CONFIG"] = str(MEETING_CONFIG.resolve())
 
-from voicetotext.config import load_config, require_hf_token_for_meeting
+from voicetotext.config import load_config, require_hf_token_for_meeting, require_llm_api_key
 
 require_hf_token_for_meeting(MEETING_CONFIG)
+require_llm_api_key(MEETING_CONFIG)
 
 import uvicorn
 

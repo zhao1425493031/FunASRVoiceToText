@@ -1,0 +1,70 @@
+host: "127.0.0.1"
+port: 8766
+service_mode: "meeting"
+asr_backend: "meeting_sensevoice"
+device: "cpu"
+language: "zh"
+
+asr_model: "iic/SenseVoiceSmall"
+vad_model: "fsmn-vad"
+trust_remote_code: false
+
+pyannote_model: "pyannote/speaker-diarization-community-1"
+pyannote_hf_token_env: "HF_TOKEN"
+
+vad_energy_threshold: 0.01
+vad_speech_onset_chunks: 1
+vad_speech_hangover_ms: 300
+vad_silence_ms: 800
+vad_silence_long_ms: 1200
+meeting_use_fsmn_endpoint: true
+meeting_max_utterance_ms: 30000
+meeting_min_utterance_ms: 400
+meeting_min_finalize_chars: 2
+meeting_reuse_partial_for_final: false
+meeting_partial_max_sec: 0
+
+min_partial_chars: 1
+meeting_emit_partial: true
+meeting_partial_interval_ms: 1000
+meeting_partial_min_ms: 500
+
+chunk_size: [0, 10, 5]
+sample_rate: 16000
+log_dir: "logs"
+
+api_key: "meeting-test-llm-key"
+api_key_scopes:
+  - meeting
+max_ws_connections: 2
+
+meeting_max_speakers: 8
+meeting_session_max_seconds: 7200
+meeting_spk_mode: multi
+meeting_spk_source: "pyannote"
+meeting_use_diarization: true
+meeting_spk_change_finalize: false
+meeting_use_utterance_embedding: false
+meeting_spk_primary: "pyannote"
+meeting_spk_embedding_model: "iic/speech_campplus_sv_zh-cn_16k-common"
+meeting_spk_embedding_threshold: 0.72
+meeting_pyannote_min_overlap_ms: 200
+
+llm:
+  enabled: true
+  api_url: "https://mock-llm.test/v1"
+  model: "qwen-plus-test"
+  api_key: "sk-test-fake-meeting-llm-key-abcdef"
+  temperature: 0.3
+  max_tokens: 4096
+  timeout: 30
+  max_input_chars: 120000
+  chunk_chars: 30000
+  retry_max: 1
+  retry_backoff_sec: 0.01
+  on_failure: warn
+  output_summary_md: true
+  meeting_output_dir: "tests/_tmp_meetings"
+  meeting_ws_wait_sec: 60
+  api_version: ""
+  deployment: ""
