@@ -10,10 +10,6 @@ logs/*
 .pytest_cache/
 pytest-cache-files-*/
 .mypy_cache/
-*.wav
 *.log
-model_cache/
-batch_jobs/
-certs/*.pem
-certs/openssl.cnf
-!certs/.gitkeep
+
+
