@@ -1,4 +1,4 @@
-"""Summary provider protocol and stub (LLM not implemented in this release)."""
+"""Summary provider protocol and stub."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class SummaryProvider(Protocol):
 
 
 class StubSummaryProvider:
-    """Placeholder; raises until LLM backend is wired."""
+    """Placeholder when llm.enabled is false."""
 
     def summarize(self, request: SummaryRequest) -> SummaryResponse:
-        raise SummaryNotImplementedError("LLM summary is not implemented yet")
+        raise SummaryNotImplementedError("LLM summary is disabled")

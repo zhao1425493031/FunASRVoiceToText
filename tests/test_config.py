@@ -19,7 +19,11 @@ def test_load_config() -> None:
     assert cfg.language == "ja"
     assert "SenseVoice" in cfg.asr_model
     assert "json" in cfg.output_formats
-    assert cfg.llm_enabled is False
+    assert cfg.llm_enabled is True
+    assert cfg.llm_provider == "openai_compatible"
+    assert cfg.llm_model == "qwen-plus"
+    assert cfg.llm_timeout_sec == 120
+    assert cfg.llm_on_failure == "warn"
     assert cfg.pyannote_min_speakers == 2
     assert cfg.pyannote_max_speakers == 2
     assert cfg.batch_diar_merge_gap_ms == 500

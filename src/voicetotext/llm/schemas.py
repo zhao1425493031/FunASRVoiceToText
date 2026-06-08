@@ -1,4 +1,4 @@
-"""LLM summary request/response schemas (reserved for future implementation)."""
+"""LLM summary request/response schemas."""
 
 from __future__ import annotations
 
@@ -25,10 +25,36 @@ class SummaryRequest:
 
 
 @dataclass
-class SummaryResponse:
-    job_id: str
-    summary: str | None
-    status: str
+class MeetingSummary:
+    title: str
+    overview: str
+    topics: list[dict[str, str]]
+    decisions: list[str]
+    action_items: list[dict[str, str]]
+    open_questions: list[str]
+    markdown: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class SummaryResponse:
+    job_id: str
+    summary: MeetingSummary | None
+    status: str
+    error: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = {
+            "job_id": self.job_id,
+            "status": self.status,
+            "error": self.error,
+            "meta": self.meta,
+        }
+        if self.summary is not None:
+            data["summary"] = self.summary.to_dict()
+        else:
+            data["summary"] = None
+        return data

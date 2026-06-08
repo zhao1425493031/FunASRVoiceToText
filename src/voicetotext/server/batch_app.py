@@ -22,8 +22,15 @@ from voicetotext.config import (
     apply_secrets,
     load_config,
 )
-from voicetotext.llm.schemas import SummaryRequest
-from voicetotext.llm.summary import StubSummaryProvider, SummaryNotImplementedError
+from voicetotext.llm.client import (
+    LLMAuthError,
+    LLMRateLimitError,
+    LLMServerError,
+    LLMTimeoutError,
+)
+from voicetotext.llm.factory import create_summary_provider
+from voicetotext.llm.schemas import SummaryRequest, SummarySegment
+from voicetotext.llm.summary import SummaryNotImplementedError, SummaryProvider
 from voicetotext.logging_setup import get_logger, setup_logging
 from voicetotext.server.auth import verify_api_key
 
@@ -32,17 +39,18 @@ config: AppConfig | None = None
 logger = get_logger(__name__)
 pipeline: BatchPipeline | None = None
 _jobs: dict[str, dict[str, Any]] = {}
-_summary_stub = StubSummaryProvider()
+_summary_provider: SummaryProvider | None = None
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="batch-job")
 
 
 def init_app(config_path: Path | None = None) -> None:
-    global _config_path, config, logger, pipeline
+    global _config_path, config, logger, pipeline, _summary_provider
     _config_path = config_path or DEFAULT_CONFIG_PATH
     config = load_config(_config_path)
     logger = setup_logging(config)
     apply_secrets(_config_path)
     pipeline = BatchPipeline(config)
+    _summary_provider = create_summary_provider(config)
 
 
 @asynccontextmanager
@@ -74,6 +82,43 @@ def _pipe() -> BatchPipeline:
     return pipeline
 
 
+def _summary() -> SummaryProvider:
+    if _summary_provider is None:
+        init_app(_config_path)
+    assert _summary_provider is not None
+    return _summary_provider
+
+
+def _load_transcript_json(job_id: str) -> dict[str, Any] | None:
+    import json
+
+    for base in (Path("out"), Path("out") / "jobs", PROJECT_ROOT / "out"):
+        path = base / f"{job_id}.json"
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return None
+
+
+def _segments_from_body(body: dict[str, Any]) -> list[SummarySegment]:
+    raw_segments = body.get("segments") or []
+    segments: list[SummarySegment] = []
+    for item in raw_segments:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        segments.append(
+            SummarySegment(
+                start_ms=int(item.get("start_ms", 0)),
+                end_ms=int(item.get("end_ms", 0)),
+                speaker_id=str(item.get("speaker_id", "")),
+                text=text,
+            )
+        )
+    return segments
+
+
 def _update_job(job_id: str, **fields: Any) -> None:
     entry = _jobs.setdefault(job_id, {})
     entry.update(fields)
@@ -101,6 +146,7 @@ def _run_job_sync(job_id: str, input_path: Path, out_dir: Path) -> None:
             progress=100,
             transcript=data,
             text=transcript_to_plain(data),
+            summary=transcript.summary,
         )
     except Exception as exc:
         logger.exception("Batch job %s failed: %s", job_id, exc)
@@ -203,6 +249,7 @@ async def job_status(
         "error": entry.get("error"),
         "text": entry.get("text"),
         "transcript": entry.get("transcript"),
+        "summary": entry.get("summary"),
     }
 
 
@@ -257,6 +304,7 @@ async def get_job(
         "status": entry.get("status"),
         "transcript": entry.get("transcript"),
         "text": entry.get("text"),
+        "summary": entry.get("summary"),
     }
 
 
@@ -271,15 +319,69 @@ async def summarize(
     _: None = Depends(verify_api_key),
 ) -> JSONResponse:
     cfg = _cfg()
-    try:
-        req = SummaryRequest(
-            job_id=str(body.get("job_id", "")),
-            language=str(body.get("language", cfg.language)),
+    if not cfg.llm_enabled:
+        return JSONResponse(
+            status_code=501,
+            content={"error": "llm_disabled", "message": "LLM summary is disabled"},
         )
-        _summary_stub.summarize(req)
+
+    job_id = str(body.get("job_id", "")).strip()
+    language = str(body.get("language", cfg.language))
+
+    if "segments" in body:
+        segments = _segments_from_body(body)
+        if not segments:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "empty_segments", "message": "segments required"},
+            )
+    elif job_id:
+        stored = _load_transcript_json(job_id)
+        if stored is None:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "job_not_found", "message": f"No transcript for {job_id}"},
+            )
+        segments = _segments_from_body(stored)
+        language = str(stored.get("language", language))
+        if not segments:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "empty_segments", "message": "segments required"},
+            )
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "empty_segments", "message": "segments required"},
+        )
+
+    req = SummaryRequest(job_id=job_id or "summary", language=language, segments=segments)
+    try:
+        resp = _summary().summarize(req)
     except SummaryNotImplementedError:
         return JSONResponse(
             status_code=501,
-            content={"error": "llm_not_implemented", "message": "LLM summary not available"},
+            content={"error": "llm_disabled", "message": "LLM summary is disabled"},
         )
-    return JSONResponse(status_code=501, content={"error": "llm_not_implemented"})
+    except LLMTimeoutError as exc:
+        return JSONResponse(
+            status_code=504,
+            content={"error": "llm_timeout", "message": str(exc)},
+        )
+    except (LLMAuthError, LLMRateLimitError, LLMServerError, RuntimeError) as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"error": "llm_upstream_error", "message": str(exc)},
+        )
+
+    if resp.status != "ok" or resp.summary is None:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": "summary_failed",
+                "message": resp.error or "summary generation failed",
+            },
+        )
+
+    data = resp.to_dict()
+    return JSONResponse(status_code=200, content=data)

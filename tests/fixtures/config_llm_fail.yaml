@@ -1,23 +1,17 @@
-# 录音文件转写 — SenseVoice + Pyannote Community-1
-# 用法: python scripts/run_batch.py input.wav -o out/
-
 host: "0.0.0.0"
 port: 8767
-device: "auto"
+device: "cpu"
 language: "ja"
-
 asr_model: "iic/SenseVoiceSmall"
 vad_model: "fsmn-vad"
 trust_remote_code: true
 sample_rate: 16000
 log_dir: "logs"
-
 pyannote_model: "pyannote/speaker-diarization-community-1"
 pyannote_min_speakers: 2
 pyannote_max_speakers: 2
 pyannote_hf_token_env: "HF_TOKEN"
 secrets_file: "secrets.meeting.yaml"
-
 output_formats: [json, md, srt]
 max_audio_duration_sec: 14400
 batch_align_min_overlap_ms: 300
@@ -25,22 +19,20 @@ batch_max_segment_ms: 30000
 batch_diar_merge_gap_ms: 500
 batch_diar_min_segment_ms: 300
 batch_asr_parallel_workers: 4
-
 api_key: "batch-dev-8n3k1q5y"
-
 llm:
   enabled: true
-  api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  api_url: "https://example.test/compatible-mode/v1"
   model: "qwen-plus"
-  api_key: "sk-db1e44404e4a4dd3a65e05b7f4f87e39"
+  api_key: "sk-testkey1234567890abcdef"
   temperature: 0.3
-  max_tokens: 8096
-  timeout: 120
-  max_input_chars: 120000
-  chunk_chars: 30000
-  retry_max: 2
-  retry_backoff_sec: 2
-  on_failure: warn
+  max_tokens: 4096
+  timeout: 30
+  max_input_chars: 50
+  chunk_chars: 30
+  retry_max: 0
+  retry_backoff_sec: 0
+  on_failure: fail
   output_summary_md: true
   api_version: ""
   deployment: ""

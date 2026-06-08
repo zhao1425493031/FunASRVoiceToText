@@ -36,7 +36,7 @@ def test_process_file_diar_first(mock_load, mock_audio, batch_config, tmp_path) 
     audio = np.zeros(16000, dtype=np.float32)
     mock_audio.return_value = (audio, 1000)
 
-    pipeline = BatchPipeline(batch_config)
+    pipeline = BatchPipeline(batch_config, skip_summary=True)
     pipeline._loaded = True
     pipeline._asr = MagicMock()
     pipeline._asr.is_loaded = True
@@ -71,7 +71,7 @@ def test_process_file_empty_diar_raises(
     audio = np.zeros(16000, dtype=np.float32)
     mock_audio.return_value = (audio, 1000)
 
-    pipeline = BatchPipeline(batch_config)
+    pipeline = BatchPipeline(batch_config, skip_summary=True)
     pipeline._loaded = True
     pipeline._asr = MagicMock()
     pipeline._diarizer = MagicMock()

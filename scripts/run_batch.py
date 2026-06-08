@@ -16,6 +16,7 @@ from voicetotext.config import (  # noqa: E402
     apply_secrets,
     load_config,
     require_hf_token,
+    require_llm_api_key,
 )
 
 
@@ -34,6 +35,11 @@ def main() -> None:
         action="store_true",
         help="Start batch HTTP API instead of CLI",
     )
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="Skip LLM meeting summary even when llm.enabled is true",
+    )
     args = parser.parse_args()
     config_path = Path(args.config)
 
@@ -42,6 +48,9 @@ def main() -> None:
         require_hf_token(config_path)
 
     config = load_config(config_path)
+
+    if not args.serve and config.llm_enabled and not args.no_summary:
+        require_llm_api_key(config_path)
 
     if args.serve:
         import uvicorn
@@ -72,7 +81,7 @@ def main() -> None:
 
     from voicetotext.asr.batch_pipeline import BatchPipeline
 
-    pipeline = BatchPipeline(config)
+    pipeline = BatchPipeline(config, skip_summary=args.no_summary)
     pipeline.load()
     out = Path(args.output)
     input_path = sanitize_audio_path(args.input)
@@ -82,6 +91,8 @@ def main() -> None:
     print(f"job_id={transcript.job_id}  segments={len(transcript.segments)}")
     for fmt in config.output_formats:
         print(f"  {fmt}: {base.with_suffix('.' + fmt.lower())}")
+    if transcript.summary and config.llm_output_summary_md:
+        print(f"  summary: {base.with_suffix('.summary.md')}")
     if "md" in config.output_formats:
         print(f"\nmd (copy-friendly): {base.with_suffix('.md')}")
 
