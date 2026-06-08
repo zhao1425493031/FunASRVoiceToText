@@ -13,6 +13,7 @@ import numpy as np
 
 from voicetotext.asr.audio_preprocess import load_audio_file
 from voicetotext.asr.batch_align import build_aligned_from_diar
+from voicetotext.asr.batch_segment_polish import polish_aligned_segments
 from voicetotext.asr.batch_speaker_refine import refine_aligned_segments
 from voicetotext.asr.batch_diar_segments import (
     DiarizationEmptyError,
@@ -160,7 +161,9 @@ class BatchPipeline:
         report("asr", 80)
 
         report("align", 85)
-        aligned = refine_aligned_segments(build_aligned_from_diar(transcribed))
+        aligned = polish_aligned_segments(
+            refine_aligned_segments(build_aligned_from_diar(transcribed))
+        )
         segment_dicts = [
             {
                 "start_ms": s.start_ms,
@@ -183,6 +186,8 @@ class BatchPipeline:
                 "source_file": input_path.name,
                 "diar_windows": len(diar_windows),
                 "speaker_refined": True,
+                "segment_polished": True,
+                "text_beautified": True,
                 "stamp_sents_available": False,
             },
             summary=None,

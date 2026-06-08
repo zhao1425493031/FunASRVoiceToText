@@ -83,7 +83,7 @@ def main() -> None:
     for fmt in config.output_formats:
         print(f"  {fmt}: {base.with_suffix('.' + fmt.lower())}")
     if "md" in config.output_formats:
-        print(f"\n复制用文本: {base.with_suffix('.md')}")
+        print(f"\nmd (copy-friendly): {base.with_suffix('.md')}")
 
 
 if __name__ == "__main__":
