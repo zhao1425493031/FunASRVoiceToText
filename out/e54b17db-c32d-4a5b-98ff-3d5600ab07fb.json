@@ -1,0 +1,119 @@
+{
+  "job_id": "e54b17db-c32d-4a5b-98ff-3d5600ab07fb",
+  "language": "ja",
+  "duration_ms": 100969,
+  "segments": [
+    {
+      "start_ms": 1026,
+      "end_ms": 6308,
+      "speaker_id": "SPEAKER_00",
+      "text": "お疲れ 様 です 先週ご相談 した 案件 の 進捗 につ いて 確認 させ て ください。"
+    },
+    {
+      "start_ms": 8147,
+      "end_ms": 15235,
+      "speaker_id": "SPEAKER_01",
+      "text": "お疲れ様です。現在基本設計は完了しており、開発作業は約七十五パーセントまで進んで、います。"
+    },
+    {
+      "start_ms": 15572,
+      "end_ms": 18880,
+      "speaker_id": "SPEAKER_00",
+      "text": "テスト環境の準備状況はいかがでしょ、うか。"
+    },
+    {
+      "start_ms": 20247,
+      "end_ms": 25259,
+      "speaker_id": "SPEAKER_01",
+      "text": "サーバーの構築は完了しましたので、明日から内部テストを開始する予定です。"
+    },
+    {
+      "start_ms": 26119,
+      "end_ms": 32380,
+      "speaker_id": "SPEAKER_00",
+      "text": "承知しました前回課題になっていた処理速度の問題は改善されていますか。"
+    },
+    {
+      "start_ms": 33899,
+      "end_ms": 41560,
+      "speaker_id": "SPEAKER_01",
+      "text": "プログラム を見直 した 結果、平均 処理 時間 を 約 2 秒 から 06 秒 まで短縮 でき ま した。"
+    },
+    {
+      "start_ms": 41560,
+      "end_ms": 49255,
+      "speaker_id": "SPEAKER_00",
+      "text": "それはいいで、すね お客様から追加要望が出ていた帳票機能についてはどうでしょうか。"
+    },
+    {
+      "start_ms": 50925,
+      "end_ms": 57777,
+      "speaker_id": "SPEAKER_01",
+      "text": "開発工数を見積もったところ、三日から五日程度の追加作業で対応可能と考えて、います。"
+    },
+    {
+      "start_ms": 58620,
+      "end_ms": 66197,
+      "speaker_id": "SPEAKER_00",
+      "text": "わかり ま した で は、今週中 に 最新 の スケジュール と 課題 一覧 を 共有 して ください。"
+    },
+    {
+      "start_ms": 66197,
+      "end_ms": 70686,
+      "speaker_id": "SPEAKER_01",
+      "text": "承知 しま した 金曜日 の 夕方 まで に 関係 者 へ展開いたし ます。"
+    },
+    {
+      "start_ms": 71074,
+      "end_ms": 76862,
+      "speaker_id": "SPEAKER_00",
+      "text": "ありがとうござ。います、ところで、来週のレビュー会議の日程は確定していますか。"
+    },
+    {
+      "start_ms": 77689,
+      "end_ms": 78584,
+      "speaker_id": "SPEAKER_01",
+      "text": "はい。"
+    },
+    {
+      "start_ms": 78584,
+      "end_ms": 82718,
+      "speaker_id": "SPEAKER_01",
+      "text": "来週火曜日の午後二時から一時間半を予定しております。"
+    },
+    {
+      "start_ms": 83157,
+      "end_ms": 86970,
+      "speaker_id": "SPEAKER_00",
+      "text": "それ で は、レビュー 用 の 資料 を 事前 に 準備 して おき ましょう。"
+    },
+    {
+      "start_ms": 87764,
+      "end_ms": 89114,
+      "speaker_id": "SPEAKER_01",
+      "text": "わかりましたこちらではい。"
+    },
+    {
+      "start_ms": 89114,
+      "end_ms": 95324,
+      "speaker_id": "SPEAKER_00",
+      "text": "用いたします。本日の確認事項は以上です。引き続きよろしくお願いたします。"
+    },
+    {
+      "start_ms": 95948,
+      "end_ms": 97939,
+      "speaker_id": "SPEAKER_01",
+      "text": "こちら こそ よろし くお 願い いたし ます。"
+    }
+  ],
+  "meta": {
+    "asr_model": "iic/SenseVoiceSmall",
+    "diarization": "community-1",
+    "pipeline": "diar_first",
+    "source_file": "20260506_001.m4a",
+    "diar_windows": 18,
+    "speaker_refined": true,
+    "stamp_sents_available": false
+  },
+  "summary": null
+}

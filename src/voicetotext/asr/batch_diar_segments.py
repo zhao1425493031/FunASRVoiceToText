@@ -131,15 +131,67 @@ def split_long_segments(
     return out
 
 
+def reassign_misplaced_short_segments(
+    segments: list[DiarizationSegment],
+    max_ms: int = 1200,
+) -> list[DiarizationSegment]:
+    """
+    Short segment labeled like previous speaker but next turn differs —
+    reassign to next speaker (common for brief 'はい' mis-clusters).
+    """
+    if len(segments) < 2 or max_ms <= 0:
+        return list(segments)
+    out = list(segments)
+    for i in range(len(out)):
+        seg = out[i]
+        if seg.end_ms - seg.start_ms > max_ms:
+            continue
+        if i == 0 or i + 1 >= len(out):
+            continue
+        prev = out[i - 1]
+        nxt = out[i + 1]
+        if prev.speaker_label != nxt.speaker_label:
+            if seg.speaker_label == prev.speaker_label:
+                out[i] = DiarizationSegment(
+                    start_ms=seg.start_ms,
+                    end_ms=seg.end_ms,
+                    speaker_label=nxt.speaker_label,
+                )
+    return out
+
+
+def drop_leading_isolated_segment(
+    segments: list[DiarizationSegment],
+    *,
+    max_duration_ms: int = 2000,
+    min_gap_to_next_ms: int = 500,
+) -> list[DiarizationSegment]:
+    """Drop short leading segment separated from the rest (opening noise)."""
+    if len(segments) < 2:
+        return list(segments)
+    first, second = segments[0], segments[1]
+    if first.end_ms - first.start_ms > max_duration_ms:
+        return segments
+    if first.start_ms > 1500:
+        return segments
+    gap = second.start_ms - first.end_ms
+    if gap >= min_gap_to_next_ms:
+        return segments[1:]
+    return segments
+
+
 def normalize_diar_segments(
     segments: list[DiarizationSegment],
     config: AppConfig,
 ) -> list[DiarizationSegment]:
-    """Sort → merge → absorb_short → split_long → sort."""
+    """Sort → merge → reassign short → absorb_short → split_long → drop leading → sort."""
     if not segments:
         return []
     ordered = sorted(segments, key=lambda s: s.start_ms)
     merged = merge_adjacent_segments(ordered, config.batch_diar_merge_gap_ms)
-    absorbed = absorb_short_segments(merged, config.batch_diar_min_segment_ms)
+    reassigned = reassign_misplaced_short_segments(merged)
+    absorbed = absorb_short_segments(reassigned, config.batch_diar_min_segment_ms)
     split = split_long_segments(absorbed, config.batch_max_segment_ms)
-    return sorted(split, key=lambda s: s.start_ms)
+    trimmed = drop_leading_isolated_segment(split)
+    return sorted(trimmed, key=lambda s: s.start_ms)
+

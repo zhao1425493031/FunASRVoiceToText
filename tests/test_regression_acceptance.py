@@ -29,7 +29,8 @@ def check_acceptance_a1_a6(data: dict) -> dict[str, bool]:
             q_speaker = seg.get("speaker_id")
             for j in range(i + 1, min(i + 4, len(segments))):
                 nxt = segments[j]
-                if nxt.get("text", "").strip() == "はい":
+                reply = nxt.get("text", "").strip().rstrip("。．")
+                if reply == "はい":
                     # 「はい」 must be answered by someone other than the questioner
                     if nxt.get("speaker_id") == q_speaker:
                         a3 = False
