@@ -12,6 +12,7 @@ import pytest
 from voicetotext.asr.sensevoice_funasr_engine import (
     SenseVoiceFunASREngine,
     _language_kw,
+    extract_stamp_sents,
     extract_text,
 )
 from voicetotext.config import load_config
@@ -32,6 +33,27 @@ def test_extract_text_list() -> None:
 def test_extract_text_empty() -> None:
     assert extract_text([]) == ""
     assert extract_text(None) == ""
+
+
+def test_extract_stamp_sents() -> None:
+    result = [
+        {
+            "stamp_sents": [
+                {"start": 100, "end": 500, "text": "<|ja|>こんにちは"},
+                {"start": 600, "end": 900, "text": "はい"},
+            ]
+        }
+    ]
+    stamps = extract_stamp_sents(result)
+    assert len(stamps) == 2
+    assert stamps[0]["start_ms"] == 100
+    assert stamps[0]["end_ms"] == 500
+    assert stamps[1]["text"] == "はい"
+
+
+def test_extract_stamp_sents_empty() -> None:
+    assert extract_stamp_sents([]) == []
+    assert extract_stamp_sents([{"text": "only"}]) == []
 
 
 def test_extract_text_string_strips_tags() -> None:

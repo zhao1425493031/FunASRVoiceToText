@@ -26,6 +26,42 @@ def _clean_sensevoice_text(text: str) -> str:
         return _SENSEVOICE_TAG_RE.sub("", text).strip()
 
 
+def extract_stamp_sents(result: Any) -> list[dict[str, int | str]]:
+    """Parse FunASR stamp_sents into [{start_ms, end_ms, text}, ...]."""
+    items: list[Any] = []
+    if isinstance(result, list):
+        items = result
+    elif isinstance(result, dict):
+        items = [result]
+
+    stamps: list[dict[str, int | str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stamp_sents = item.get("stamp_sents")
+        if not isinstance(stamp_sents, list):
+            continue
+        for sent in stamp_sents:
+            if not isinstance(sent, dict):
+                continue
+            start = sent.get("start")
+            end = sent.get("end")
+            text = sent.get("text") or sent.get("value") or ""
+            if start is None or end is None:
+                continue
+            cleaned = _clean_sensevoice_text(str(text))
+            if not cleaned:
+                continue
+            stamps.append(
+                {
+                    "start_ms": int(start),
+                    "end_ms": int(end),
+                    "text": cleaned,
+                }
+            )
+    return stamps
+
+
 def extract_text(result: Any) -> str:
     if not result:
         return ""
@@ -108,6 +144,9 @@ class SenseVoiceFunASREngine:
                 use_itn=True,
                 batch_size_s=300,
             )
+            stamp_sents = extract_stamp_sents(res)
+            if stamp_sents:
+                logger.debug("SenseVoice stamp_sents count=%d", len(stamp_sents))
             return extract_text(res)
         except Exception as exc:
             logger.warning("SenseVoice transcribe failed: %s", exc)

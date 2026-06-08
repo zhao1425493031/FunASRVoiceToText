@@ -13,8 +13,6 @@ pytest-cache-files-*/
 *.wav
 *.log
 model_cache/
-secrets.meeting.yaml
-out/
 batch_jobs/
 certs/*.pem
 certs/openssl.cnf

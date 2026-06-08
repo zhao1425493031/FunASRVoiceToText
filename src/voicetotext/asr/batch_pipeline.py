@@ -1,10 +1,9 @@
-"""Offline batch orchestration: preprocess → ASR + diarization → align → export."""
+"""Offline batch orchestration: preprocess → diarization → ASR per window → export."""
 
 from __future__ import annotations
 
 import json
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
@@ -13,8 +12,12 @@ from typing import Any
 import numpy as np
 
 from voicetotext.asr.audio_preprocess import load_audio_file
-from voicetotext.asr.batch_align import AsrSegment, align_batch_segments
-from voicetotext.asr.funasr_vad import FunASRVAD
+from voicetotext.asr.batch_align import build_aligned_from_diar
+from voicetotext.asr.batch_diar_segments import (
+    DiarizationEmptyError,
+    normalize_diar_segments,
+)
+from voicetotext.asr.batch_transcribe import transcribe_diar_windows
 from voicetotext.asr.pyannote_offline import PyannoteOfflineDiarizer
 from voicetotext.asr.sensevoice_funasr_engine import SenseVoiceFunASREngine
 from voicetotext.config import AppConfig
@@ -70,52 +73,15 @@ def _ms_to_srt(ms: int) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def _split_long_vad(
-    segments: list[tuple[int, int]],
-    max_ms: int,
-) -> list[tuple[int, int]]:
-    out: list[tuple[int, int]] = []
-    for start, end in segments:
-        cursor = start
-        while cursor < end:
-            chunk_end = min(end, cursor + max_ms)
-            out.append((cursor, chunk_end))
-            cursor = chunk_end
-    return out or [(0, max_ms)]
-
-
-def _transcribe_vad_segments(
-    audio: np.ndarray,
-    vad_segments: list[tuple[int, int]],
-    asr: SenseVoiceFunASREngine,
-    sample_rate: int,
-    language: str,
-) -> list[AsrSegment]:
-    results: list[AsrSegment] = []
-    cache: dict = {}
-    for start_ms, end_ms in vad_segments:
-        s0 = int(start_ms * sample_rate / 1000)
-        s1 = int(end_ms * sample_rate / 1000)
-        chunk = audio[s0:s1]
-        if chunk.size == 0:
-            continue
-        text = asr.transcribe(chunk, cache, is_final=True, language=language)
-        if text.strip():
-            results.append(AsrSegment(start_ms=start_ms, end_ms=end_ms, text=text))
-    return results
-
-
 class BatchPipeline:
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self._asr = SenseVoiceFunASREngine(config)
-        self._vad = FunASRVAD(config)
         self._diarizer = PyannoteOfflineDiarizer(config)
         self._loaded = False
 
     def load(self) -> None:
         self._asr.load()
-        self._vad.load()
         self._diarizer.load()
         self._loaded = True
 
@@ -130,12 +96,12 @@ class BatchPipeline:
 
         return {
             "asr_loaded": self._asr.is_loaded,
-            "vad_loaded": self._vad.is_loaded,
             "pyannote_ready": self._diarizer.is_ready,
             "hf_token_set": bool(
                 os.environ.get(self.config.pyannote_hf_token_env, "").strip()
             ),
             "asr_model": self.config.asr_model,
+            "pipeline": "diar_first",
         }
 
     def process_file(
@@ -159,38 +125,41 @@ class BatchPipeline:
         sr = self.config.sample_rate
         report("preprocess", 20)
 
-        def run_asr() -> list[AsrSegment]:
-            report("asr", 30)
-            vad_raw = self._vad.segment_utterances(audio)
-            vad_segments = _split_long_vad(
-                vad_raw or [(0, duration_ms)],
-                self.config.batch_max_segment_ms,
+        report("diarization", 30)
+        raw_diar = self._diarizer.diarize(audio, sr)
+        if not raw_diar:
+            logger.error("Pyannote returned no diarization segments for %s", input_path.name)
+            raise DiarizationEmptyError(
+                f"No speaker diarization segments for {input_path.name}. "
+                "Check HF token and audio content."
             )
-            segs = _transcribe_vad_segments(
-                audio,
-                vad_segments,
-                self._asr,
-                sr,
-                self.config.language,
+        report("diarization", 45)
+
+        diar_windows = normalize_diar_segments(raw_diar, self.config)
+        if not diar_windows:
+            raise DiarizationEmptyError(
+                f"Diarization normalization produced no segments for {input_path.name}"
             )
-            report("asr", 55)
-            return segs
+        logger.info(
+            "Diar windows: raw=%d normalized=%d",
+            len(raw_diar),
+            len(diar_windows),
+        )
+        report("diarization", 55)
 
-        def run_diar() -> list:
-            report("diarization", 35)
-            segs = self._diarizer.diarize(audio, sr)
-            report("diarization", 55)
-            return segs
+        report("asr", 60)
+        transcribed = transcribe_diar_windows(
+            audio,
+            diar_windows,
+            self._asr,
+            sr,
+            self.config.language,
+            self.config.batch_asr_parallel_workers,
+        )
+        report("asr", 80)
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            asr_future = pool.submit(run_asr)
-            diar_future = pool.submit(run_diar)
-            asr_segments = asr_future.result()
-            diar_segments = diar_future.result()
-
-        report("align", 70)
-        aligned = align_batch_segments(asr_segments, diar_segments, self.config)
         report("align", 85)
+        aligned = build_aligned_from_diar(transcribed)
         segment_dicts = [
             {
                 "start_ms": s.start_ms,
@@ -209,7 +178,10 @@ class BatchPipeline:
             meta={
                 "asr_model": self.config.asr_model,
                 "diarization": "community-1",
+                "pipeline": "diar_first",
                 "source_file": input_path.name,
+                "diar_windows": len(diar_windows),
+                "stamp_sents_available": False,
             },
             summary=None,
         )

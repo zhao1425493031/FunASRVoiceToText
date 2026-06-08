@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from voicetotext.asr.batch_transcribe import TranscribedWindow
 from voicetotext.asr.speaker_timeline import DiarizationSegment, SpeakerTimelineMerger
 from voicetotext.config import AppConfig
 
@@ -63,4 +64,32 @@ def align_batch_segments(
                 text=seg.text.strip(),
             )
         )
+    return aligned
+
+
+def build_aligned_from_diar(
+    windows: list[TranscribedWindow],
+) -> list[AlignedSegment]:
+    """Map diar-first transcribed windows to export segments (no overlap align)."""
+    label_to_num: dict[str, int] = {}
+    aligned: list[AlignedSegment] = []
+
+    for win in windows:
+        if not win.text.strip():
+            continue
+        label = win.speaker_label
+        if label not in label_to_num:
+            label_to_num[label] = len(label_to_num)
+        speaker_num = label_to_num[label]
+        export_id = _label_to_export_id(label, speaker_num)
+        aligned.append(
+            AlignedSegment(
+                start_ms=win.start_ms,
+                end_ms=win.end_ms,
+                speaker_id=export_id,
+                text=win.text.strip(),
+            )
+        )
+
+    aligned.sort(key=lambda s: s.start_ms)
     return aligned

@@ -1,6 +1,6 @@
 # 录音文件转写
 
-SenseVoice + Pyannote：日文/中文转写、说话人分离、时间戳。
+SenseVoice + Pyannote：日文/中文转写、说话人分离、时间戳。批处理采用 **Diar-First**（先说话人分段，再逐段转写）。
 
 ## 安装
 
@@ -36,3 +36,13 @@ python scripts/run_batch.py meeting.wav -c config.yaml -o out/
 ## 配置
 
 `config.yaml` — 语言（`ja`/`zh`）、设备等。说话人分离需配置 `secrets.meeting.yaml` 中的 `hf_token`。
+
+默认按 **2 人会议** 优化（`pyannote_min_speakers: 2`、`pyannote_max_speakers: 2`）。更多说话人时请修改 `config.yaml` 中对应字段。
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `batch_diar_merge_gap_ms` | 500 | 同说话人相邻段合并间隙 |
+| `batch_diar_min_segment_ms` | 300 | 过短 diar 段吸收阈值 |
+| `batch_asr_parallel_workers` | 4 | 并行 ASR 线程数 |
+
+输出 JSON 的 `meta.pipeline` 为 `diar_first` 表示新管线。

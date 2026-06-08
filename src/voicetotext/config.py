@@ -37,6 +37,9 @@ class AppConfig:
     max_audio_duration_sec: int
     batch_align_min_overlap_ms: int
     batch_max_segment_ms: int
+    batch_diar_merge_gap_ms: int
+    batch_diar_min_segment_ms: int
+    batch_asr_parallel_workers: int
     llm_enabled: bool
     llm_provider: str
     llm_model: str
@@ -131,6 +134,28 @@ def _validate_config(raw: dict[str, Any]) -> None:
     lang = str(raw.get("language", "ja")).lower()
     if lang not in ("ja", "zh"):
         raise ValueError(f"Unsupported language: {lang} (use ja or zh)")
+
+    min_spk = int(raw.get("pyannote_min_speakers", 2))
+    max_spk = int(raw.get("pyannote_max_speakers", 2))
+    if min_spk < 1:
+        raise ValueError(f"pyannote_min_speakers must be >= 1, got {min_spk}")
+    if max_spk > 0 and min_spk > max_spk:
+        raise ValueError(
+            f"pyannote_min_speakers ({min_spk}) must be <= "
+            f"pyannote_max_speakers ({max_spk})"
+        )
+
+    merge_gap = int(raw.get("batch_diar_merge_gap_ms", 500))
+    if merge_gap < 0:
+        raise ValueError(f"batch_diar_merge_gap_ms must be >= 0, got {merge_gap}")
+
+    min_seg = int(raw.get("batch_diar_min_segment_ms", 300))
+    if min_seg < 100:
+        raise ValueError(f"batch_diar_min_segment_ms must be >= 100, got {min_seg}")
+
+    workers = int(raw.get("batch_asr_parallel_workers", 4))
+    if workers < 1:
+        raise ValueError(f"batch_asr_parallel_workers must be >= 1, got {workers}")
 
 
 def _valid_hf_token(token: str) -> bool:
@@ -238,14 +263,17 @@ def load_config(path: Path | None = None) -> AppConfig:
         pyannote_model=str(
             raw.get("pyannote_model", "pyannote/speaker-diarization-community-1")
         ),
-        pyannote_min_speakers=int(raw.get("pyannote_min_speakers", 1)),
-        pyannote_max_speakers=int(raw.get("pyannote_max_speakers", 0)),
+        pyannote_min_speakers=int(raw.get("pyannote_min_speakers", 2)),
+        pyannote_max_speakers=int(raw.get("pyannote_max_speakers", 2)),
         pyannote_hf_token_env=str(raw.get("pyannote_hf_token_env", "HF_TOKEN")),
         secrets_file=str(raw.get("secrets_file", "secrets.meeting.yaml")),
         output_formats=output_formats,
         max_audio_duration_sec=int(raw.get("max_audio_duration_sec", 14400)),
         batch_align_min_overlap_ms=int(raw.get("batch_align_min_overlap_ms", 300)),
         batch_max_segment_ms=int(raw.get("batch_max_segment_ms", 30000)),
+        batch_diar_merge_gap_ms=int(raw.get("batch_diar_merge_gap_ms", 500)),
+        batch_diar_min_segment_ms=int(raw.get("batch_diar_min_segment_ms", 300)),
+        batch_asr_parallel_workers=int(raw.get("batch_asr_parallel_workers", 4)),
         llm_enabled=llm_enabled,
         llm_provider=llm_provider,
         llm_model=llm_model,

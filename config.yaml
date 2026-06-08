@@ -13,8 +13,8 @@ sample_rate: 16000
 log_dir: "logs"
 
 pyannote_model: "pyannote/speaker-diarization-community-1"
-pyannote_min_speakers: 1
-pyannote_max_speakers: 0
+pyannote_min_speakers: 2
+pyannote_max_speakers: 2
 pyannote_hf_token_env: "HF_TOKEN"
 secrets_file: "secrets.meeting.yaml"
 
@@ -22,6 +22,9 @@ output_formats: [json, md, srt]
 max_audio_duration_sec: 14400
 batch_align_min_overlap_ms: 300
 batch_max_segment_ms: 30000
+batch_diar_merge_gap_ms: 500
+batch_diar_min_segment_ms: 300
+batch_asr_parallel_workers: 4
 
 api_key: "batch-dev-8n3k1q5y"
 
